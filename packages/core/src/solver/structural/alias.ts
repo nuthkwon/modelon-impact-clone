@@ -15,11 +15,11 @@
  * of eliminated variables are merged into the representative; conflicting `fixed=true` start
  * values of two states are an error.
  */
-import { ModelicaError, type Expr } from '../../ast.js';
+import { ModelicaError } from '../../ast.js';
 import type { FlatEquation, FlatVariable, VariableAttributes } from '../../flat.js';
-import { refName, tryEvaluateConstant, type ConstValue } from '../../flatten/evaluate.js';
-import { derivativeName, equationLinearForm, substituteAliases, type Replacement } from './expr.js';
-import { equationText, trivialEquationError, type WorkingModel } from './model.js';
+import { refName } from '../../flatten/evaluate.js';
+import { equationLinearForm, substituteAliases, type Replacement } from './expr.js';
+import { trivialEquationError, type WorkingModel } from './model.js';
 
 /** `x = scale * rep + offset`. */
 export interface AliasEntry {
@@ -54,8 +54,8 @@ export function representativeKey(v: FlatVariable, wm: WorkingModel): (number | 
     wm.states.has(v.name) ? 0 : 1,
     STATE_SELECT_RANK[a.stateSelect ?? 'default'] ?? 2,
     a.fixed === true && a.start !== undefined ? 0 : 1,
-    a.start !== undefined ? 0 : 1,
     isRelative(v.name) ? 1 : 0,
+    a.start !== undefined ? 0 : 1,
     v.name.length,
     v.name,
   ];
@@ -91,7 +91,7 @@ export function detectAliases(wm: WorkingModel): DetectedAlias[] {
   const derDefs = new Map<string, DerivativeDefinition[]>();
   const isVar = (name: string): boolean => wm.byName.has(name) && wm.isUnknown(name);
   wm.flat.equations.forEach((eq, index) => {
-    const lf = equationLinearForm(eq.left, eq.right, wm.env, wm.isUnknown);
+    const lf = equationLinearForm(eq.left, eq.right, wm.env, wm.isRealUnknown);
     if (lf) {
       if (lf.coeffs.size === 0) throw trivialEquationError(eq, lf.constant, wm.flat.className);
       if (lf.coeffs.size === 2) {
@@ -101,7 +101,7 @@ export function detectAliases(wm: WorkingModel): DetectedAlias[] {
           const v2 = wm.byName.get(n2)!;
           if (v1.type === 'Real' && v2.type === 'Real' && v1.variability === v2.variability && Number.isFinite(k1) && Number.isFinite(k2) && k1 !== 0 && k2 !== 0) {
             // k1*n1 + k2*n2 + c = 0  ->  n1 = -(k2/k1) n2 - c/k1
-            out.push({ equation: index, a: n1, b: n2, scale: -k2 / k1, offset: -lf.constant / k1 });
+            out.push({ equation: index, a: n1, b: n2, scale: -k2 / k1, offset: -lf.constant / k1 || 0 });
           }
           return;
         }
@@ -146,7 +146,7 @@ export function detectAliases(wm: WorkingModel): DetectedAlias[] {
       if (d.v === first.v || d.k === 0) continue;
       // der(x) = (v1 - c1)/k1  ->  v_i = k_i (v1 - c1)/k1 + c_i
       const scale = d.k / first.k;
-      out.push({ equation: d.equation, a: d.v, b: first.v, scale, offset: d.c - scale * first.c });
+      out.push({ equation: d.equation, a: d.v, b: first.v, scale, offset: d.c - scale * first.c || 0 });
     }
   }
   return out;
@@ -288,7 +288,7 @@ export function eliminateAliases(wm: WorkingModel, aliases: AliasMap): number {
       if (x === rep) continue;
       const t = uf.find(x); // x = s*root + o = (s/sr) rep + (o - s*or/sr)
       const scale = t.scale / tr.scale;
-      const offset = t.offset - (t.scale * tr.offset) / tr.scale;
+      const offset = (t.offset - (t.scale * tr.offset) / tr.scale) || 0;
       mergeAttributes(wm, wm.byName.get(x)!, repVar, scale, offset);
       replacements.set(x, { rep, scale, offset });
       eliminated++;
@@ -303,10 +303,10 @@ export function eliminateAliases(wm: WorkingModel, aliases: AliasMap): number {
       // The representative became constant: keep the entry pointing at the (now constant) variable.
       continue;
     }
-    aliases.set(name, { rep: r.rep, scale: entry.scale * r.scale, offset: entry.scale * r.offset + entry.offset });
+    aliases.set(name, { rep: r.rep, scale: entry.scale * r.scale, offset: (entry.scale * r.offset + entry.offset) || 0 });
   }
   for (const [name, r] of replacements) {
-    if (r.rep !== undefined) aliases.set(name, { rep: r.rep, scale: r.scale, offset: r.offset });
+    if (r.rep !== undefined) aliases.set(name, { rep: r.rep, scale: r.scale, offset: r.offset || 0 });
   }
 
   // Substitute and drop.
@@ -379,9 +379,3 @@ export function describeAlias(x: string, rep: string, scale: number, offset: num
   return `${x} = ${s}`;
 }
 
-/** Evaluated constant of an expression (for tests and diagnostics). */
-export function constantOf(e: Expr, wm: WorkingModel): ConstValue | undefined {
-  return tryEvaluateConstant(e, wm.env);
-}
-
-export { derivativeName, equationText };

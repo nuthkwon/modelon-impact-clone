@@ -167,6 +167,7 @@ export function newtonSolve(p: NewtonProblem, z: Float64Array, cache: JacobianCa
 
   const fNew = new Float64Array(n);
   const dz = new Float64Array(n);
+  const dzBar = new Float64Array(n);
   const zTrial = new Float64Array(n);
   const w = new Float64Array(n);
   const scratch = new Float64Array(n);
@@ -212,7 +213,12 @@ export function newtonSolve(p: NewtonProblem, z: Float64Array, cache: JacobianCa
       if (r > fullStep) fullStep = r;
     }
 
-    // Backtracking line search on the (row-equilibrated) residual norm.
+    // Backtracking line search. A trial step is accepted when the (row-equilibrated) residual
+    // norm decreases, or when Deuflhard's natural monotonicity test holds: the simplified
+    // Newton correction at the trial point, J^-1 F(z + lambda dz), is shorter than
+    // (1 - lambda/2) |dz| in the convergence weights. The second test is affine invariant and
+    // does not depend on how the equations happen to be scaled (e.g. bilinear rows such as
+    // `P = v*i` whose residual grows quadratically along an otherwise exact Newton step).
     const fNorm0 = scaledResidualNorm(f, cache.factors, n);
     let lambda = 1;
     let accepted = false;
@@ -229,6 +235,16 @@ export function newtonSolve(p: NewtonProblem, z: Float64Array, cache: JacobianCa
         }
         const fNorm1 = scaledResidualNorm(fNew, cache.factors, n);
         if (fNorm1 <= fNorm0 * (1 - 1e-4 * lambda) || fNorm1 <= 1e-300) {
+          accepted = true;
+          break;
+        }
+        luSolve(cache.factors, fNew, dzBar);
+        let barStep = 0;
+        for (let i = 0; i < n; i++) {
+          const r = Math.abs(dzBar[i]) / w[i];
+          if (r > barStep) barStep = r;
+        }
+        if (barStep <= (1 - 0.5 * lambda) * fullStep) {
           accepted = true;
           break;
         }

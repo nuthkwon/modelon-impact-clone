@@ -10,3 +10,5 @@ apps/server/data/*.json
 !apps/server/data/.gitkeep
 .DS_Store
 *.log
+apps/web/e2e/.data/
+apps/web/e2e/test-results/

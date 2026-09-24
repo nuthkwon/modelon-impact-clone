@@ -43,17 +43,17 @@ export function detectPropagations(wm: WorkingModel): Propagation[] {
   const out: Propagation[] = [];
   const seen = new Set<string>();
   wm.flat.equations.forEach((eq, index) => {
-    const lf = equationLinearForm(eq.left, eq.right, wm.env, wm.isUnknown);
+    const lf = equationLinearForm(eq.left, eq.right, wm.env, wm.isRealUnknown);
     if (lf) {
       if (lf.coeffs.size === 0) throw trivialEquationError(eq, lf.constant, wm.flat.className);
       if (lf.coeffs.size !== 1) return;
       const [[name, k]] = [...lf.coeffs.entries()];
       const v = canPropagate(wm, name);
-      if (!v || v.type !== 'Real' || seen.has(name)) return;
+      if (!v || v.type === 'Boolean' || seen.has(name)) return;
       const value = -lf.constant / k;
       if (!Number.isFinite(value)) return;
       seen.add(name);
-      out.push({ equation: index, name, value });
+      out.push({ equation: index, name, value: coerce(v, value, eq) });
       return;
     }
     // Boolean / Integer: `x = <constant>` or `<constant> = x`.

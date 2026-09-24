@@ -56,7 +56,13 @@ export function DetailsHeader({ activeClass, component, selectionCount, icon, re
     if (!name || name === title) return;
     if (component) {
       if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) return;
-      void applyEdit({ op: 'renameComponent', name: component.name, newName: name });
+      const oldName = component.name;
+      void applyEdit({ op: 'renameComponent', name: oldName, newName: name }).then((result) => {
+        if (!result || result.diagnostics.some((d) => d.severity === 'error')) return;
+        // Keep the renamed component selected (the selection still holds the old name).
+        const { selection, select, selectedConnection } = useStore.getState();
+        if (selection.includes(oldName)) select(selection.map((n) => (n === oldName ? name : n)), selectedConnection);
+      });
     } else {
       shell.openRename({ kind: 'class', name: activeClass });
     }

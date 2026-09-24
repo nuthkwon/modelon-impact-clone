@@ -149,13 +149,24 @@ const RELATIONAL_OPS = new Set(['<', '<=', '>', '>=', '==', '<>']);
 /** Operators whose arguments never count as structural incidence (they read the past or fire events). */
 const OPAQUE_CALLS = new Set(['pre', 'edge', 'change', 'initial', 'terminal', 'sample', 'reinit', 'assert', 'terminate']);
 
+export interface IncidenceOptions {
+  /**
+   * Also count variables inside relations and if-conditions. False (default) gives the
+   * incidence used for matching (an equation cannot be solved for a variable that only
+   * influences it through a Boolean condition); true gives the dependencies used for
+   * ordering blocks (the condition must be known before the equation is solved).
+   */
+  conditions?: boolean;
+}
+
 /**
  * Structural incidence of an expression: every unknown (as decided by `isUnknown`) with the
- * highest derivative order it appears at. Variables inside `pre()`/`edge()`/`change()` and
- * inside relations (`a < b`, if-conditions) are not counted: an equation cannot determine a
- * variable that only influences it through a Boolean condition.
+ * highest derivative order it appears at. Variables inside `pre()`/`edge()`/`change()` are
+ * never counted; variables inside relations (`a < b`, if-conditions) only with
+ * `options.conditions`.
  */
-export function incidence(e: Expr, isUnknown: (name: string) => boolean, out: Map<string, number> = new Map()): Map<string, number> {
+export function incidence(e: Expr, isUnknown: (name: string) => boolean, out: Map<string, number> = new Map(), options: IncidenceOptions = {}): Map<string, number> {
+  const conditions = options.conditions === true;
   const note = (base: string, order: number): void => {
     if (!isUnknown(base)) return;
     const prev = out.get(base);
@@ -180,7 +191,7 @@ export function incidence(e: Expr, isUnknown: (name: string) => boolean, out: Ma
         return;
       }
       case 'binary':
-        if (RELATIONAL_OPS.has(x.op)) return;
+        if (RELATIONAL_OPS.has(x.op) && !conditions) return;
         visit(x.left);
         visit(x.right);
         return;
@@ -188,7 +199,10 @@ export function incidence(e: Expr, isUnknown: (name: string) => boolean, out: Ma
         visit(x.operand);
         return;
       case 'if':
-        for (const b of x.branches) visit(b.value);
+        for (const b of x.branches) {
+          if (conditions) visit(b.cond);
+          visit(b.value);
+        }
         visit(x.else);
         return;
       case 'array':

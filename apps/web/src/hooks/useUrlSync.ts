@@ -46,7 +46,7 @@ export function useUrlSync(workspaceId: string): void {
     const q = initial.current;
     if (q.className && s.registry.has(q.className)) s.openClass(q.className);
     if (q.mode) s.setMode(q.mode);
-    if (q.view && (q.view === 'diagram' || s.activeClass)) s.setView(q.view);
+    if (q.view && (q.view === 'diagram' || useStore.getState().activeClass)) s.setView(q.view);
     applied.current = workspaceId;
   }, [workspaceId, loading, loadError, storeWid, registryVersion]);
 

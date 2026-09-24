@@ -329,7 +329,7 @@ function derivedVariable(base: FlatVariable, name: string, order: number): FlatV
 function buildPreference(wm: WorkingModel, eqs: EqInfo[]): (s: DerivativeSymbol) => (number | string)[] {
   const velocityOf = new Map<string, string>();
   for (const E of eqs) {
-    const lf = equationLinearForm(E.eq.left, E.eq.right, wm.env, wm.isUnknown);
+    const lf = equationLinearForm(E.eq.left, E.eq.right, wm.env, wm.isRealUnknown);
     if (!lf || lf.coeffs.size !== 2) continue;
     const names = [...lf.coeffs.keys()];
     const derIdx = names.findIndex((n) => n.startsWith('der(') && !wm.byName.has(n));
@@ -364,19 +364,26 @@ function buildPreference(wm: WorkingModel, eqs: EqInfo[]): (s: DerivativeSymbol)
     let k = familyKey.get(r);
     if (k) return k;
     const members = families.get(r) ?? [x];
-    let stateSelect = 2;
+    const rankOf = (m: string): number | undefined => {
+      if (wm.reinitTargets.has(m)) return 4;
+      const ss = wm.byName.get(m)!.attributes.stateSelect;
+      return ss === undefined ? undefined : STATE_SELECT_RANK[ss];
+    };
+    // The root's explicit stateSelect decides; otherwise a `prefer`/`always` on any member
+    // protects the family, and a `never`/`avoid` on any member exposes it.
+    let stateSelect = rankOf(r) ?? 2;
+    if (rankOf(r) === undefined) {
+      const ranks = members.map(rankOf).filter((v): v is number => v !== undefined);
+      if (ranks.some((v) => v > 2)) stateSelect = Math.max(...ranks);
+      else if (ranks.length) stateSelect = Math.min(...ranks);
+    }
     let hasFixed = 0;
     let isRel = 0;
     for (const m of members) {
       const v = wm.byName.get(m)!;
-      const rank = wm.reinitTargets.has(m) ? 4 : STATE_SELECT_RANK[v.attributes.stateSelect ?? 'default'] ?? 2;
-      if (m === r || rank !== 2) stateSelect = m === r ? rank : Math.max(stateSelect, rank);
       if (v.attributes.fixed === true && v.attributes.start !== undefined) hasFixed = 1;
       if (/_rel(\.|$)/.test(m)) isRel = 1;
     }
-    // `never`/`avoid` on any member wins over `prefer`/`always` on another only if the root says so.
-    const rootRank = STATE_SELECT_RANK[wm.byName.get(r)?.attributes.stateSelect ?? 'default'] ?? 2;
-    if (rootRank < 2) stateSelect = rootRank;
     k = [stateSelect, hasFixed, isRel ? 0 : 1];
     familyKey.set(r, k);
     return k;

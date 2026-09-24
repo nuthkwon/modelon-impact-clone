@@ -24,6 +24,8 @@ export interface WorkingModel {
   warnings: string[];
   /** True for a variable that is an unknown of the continuous/algebraic system. */
   isUnknown(name: string): boolean;
+  /** `isUnknown` restricted to Real variables (the only ones that can be terms of a linear form). */
+  isRealUnknown(name: string): boolean;
   /** Recomputes `states` after equations changed. */
   refreshStates(): void;
 }
@@ -79,6 +81,9 @@ export function createWorkingModel(flat: FlatModel, baseEnv: EvalEnv): WorkingMo
       if (v.variability !== 'continuous' && v.variability !== 'discrete') return false;
       if (v.type === 'String') return false;
       return !whenAssigned.has(name);
+    },
+    isRealUnknown(name: string): boolean {
+      return wm.isUnknown(name) && byName.get(name)!.type === 'Real';
     },
     refreshStates(): void {
       wm.states = collectStates(wm.flat);

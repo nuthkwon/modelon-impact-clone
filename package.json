@@ -17,6 +17,7 @@
     "build": "npm run build -w packages/core && npm run build -w packages/protocol && npm run build -w apps/server && npm run build -w apps/web",
     "start": "npm run start -w apps/server",
     "test": "vitest run",
+    "test:e2e": "npm run test:e2e -w apps/web",
     "typecheck": "tsc -b packages/core packages/protocol apps/server apps/web",
     "lint": "tsc -b packages/core packages/protocol apps/server apps/web --noEmit"
   },

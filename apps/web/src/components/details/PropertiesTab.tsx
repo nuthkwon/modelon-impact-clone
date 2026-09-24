@@ -106,6 +106,8 @@ export function PropertiesTab({ activeClass, component, mode, readOnly }: Proper
   useEffect(() => {
     if (!tabNames.includes(subTab)) setSubTab(tabNames[0]);
   }, [tabNames, subTab]);
+  // A new target (class ↔ component) starts on the default sub-tab again instead of inheriting e.g. "Variables".
+  useEffect(() => setSubTab(DEFAULT_DIALOG_TAB), [componentName, targetClass]);
 
   const filterActive = text.trim() !== '' || chips.favorites || !chips.parameters || !chips.results;
   const toggleChip = (k: keyof Chips) => setChips((c) => ({ ...c, [k]: !c[k] }));

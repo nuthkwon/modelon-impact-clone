@@ -179,8 +179,10 @@ export function bltSort(nEq: number, adj: ReadonlyArray<ReadonlyArray<number>>, 
 export interface StructuralSystem {
   /** Unknown names in column order (`der(x)` for states, the variable itself otherwise). */
   unknowns: string[];
-  /** Equation index -> incident unknown columns. */
+  /** Equation index -> unknown columns the equation can be solved for. */
   adjacency: number[][];
+  /** Equation index -> unknown columns the equation depends on (adjacency plus condition variables); use for `bltSort`. */
+  dependencies: number[][];
   matching: Matching;
 }
 
@@ -199,27 +201,40 @@ export function analyzeStructure(flat: FlatModel, isUnknown: (name: string) => b
     columns.set(name, unknowns.length);
     unknowns.push(name);
   }
-  const adjacency = flat.equations.map((eq) => {
-    const inc = incidence(eq.left, isUnknown);
-    incidence(eq.right, isUnknown, inc);
-    const cols: number[] = [];
-    for (const [base, order] of inc) {
-      const isState = states.has(base);
-      const key = isState ? `der(${base})` : base;
-      if (isState && order < 1) continue; // the state itself is known
-      const c = columns.get(key);
-      if (c !== undefined) cols.push(c);
-    }
-    return cols;
-  });
+  const build = (conditions: boolean): number[][] =>
+    flat.equations.map((eq) => {
+      const inc = incidence(eq.left, isUnknown, new Map(), { conditions });
+      incidence(eq.right, isUnknown, inc, { conditions });
+      const cols: number[] = [];
+      for (const [base, order] of inc) {
+        const isState = states.has(base);
+        const key = isState ? `der(${base})` : base;
+        if (isState && order < 1) continue; // the state itself is known
+        const c = columns.get(key);
+        if (c !== undefined) cols.push(c);
+      }
+      return cols;
+    });
+  const adjacency = build(false);
+  const dependencies = build(true);
   const matching = maximumMatching(adjacency.length, unknowns.length, adjacency);
-  return { unknowns, adjacency, matching };
+  return { unknowns, adjacency, dependencies, matching };
 }
 
-/** Incidence columns of one expression pair against an explicit column map (order 0 or 1 symbols). */
-export function incidenceColumns(left: Expr, right: Expr, isUnknown: (name: string) => boolean, column: (base: string, order: number) => number | undefined): number[] {
-  const inc = incidence(left, isUnknown);
-  incidence(right, isUnknown, inc);
+/**
+ * Incidence columns of one expression pair against an explicit column map (order 0 or 1
+ * symbols). With `conditions`, variables inside relations/if-conditions are included (block
+ * dependencies rather than solvability).
+ */
+export function incidenceColumns(
+  left: Expr,
+  right: Expr,
+  isUnknown: (name: string) => boolean,
+  column: (base: string, order: number) => number | undefined,
+  conditions = false,
+): number[] {
+  const inc = incidence(left, isUnknown, new Map(), { conditions });
+  incidence(right, isUnknown, inc, { conditions });
   const cols = new Set<number>();
   for (const [base, order] of inc) {
     for (let o = 0; o <= order; o++) {

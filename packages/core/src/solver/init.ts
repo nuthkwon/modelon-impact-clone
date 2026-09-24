@@ -7,11 +7,16 @@
  * those with fixed=false); all other states keep their `start` value. Newton starts from the
  * `start` guesses; on failure it retries with a full (refreshed every iteration) damped Newton
  * and finally with a Newton homotopy from the start values.
+ *
+ * Before the simultaneous solve, the initial system is sorted into BLT blocks
+ * (`structural/blt-init.ts`) and solved block by block; the simultaneous strategies are the
+ * fallback when a block does not converge or when the structural matching is not perfect.
  */
 import { ModelicaError } from '../ast.js';
 import type { UnknownInfo } from './compile.js';
 import type { EventHandler } from './events.js';
 import { JacobianCache, newtonSolve, type NewtonProblem, type NewtonResult } from './newton.js';
+import { analyzeInitialization, solveInitializationBlockwise } from './structural/blt-init.js';
 import { fmt, type System } from './system.js';
 
 const INIT_RTOL = 1e-10;
@@ -97,15 +102,36 @@ export function initialize(sys: System, events: EventHandler): void {
   const cache = new JacobianCache(n);
   const relFresh = new Uint8Array(m.relations.length);
 
+  // Block-wise (BLT) solve first; the simultaneous strategies are the fallback.
+  const freeStates = free.map((u) => u.index);
+  const blt = n > 0 ? analyzeInitialization(m, free) : undefined;
+  if (n > 0 && !blt) sys.log('debug', 'Initialization: the initial system has no perfect structural matching; solving all equations simultaneously');
+
   // Relations are frozen during Newton; iterate until they are consistent with the solution.
   events.evalRelations(t0, sys.v, sys.dv, ctx.relVals);
   sys.bindCanonical();
   let consistent = false;
   for (let iter = 0; iter < 20 && !consistent; iter++) {
     if (n > 0) {
-      const res = solveWithStrategies(sys, problem, z, z0, cache);
-      sys.stats.newtonIterations += res.iterations;
-      sys.stats.jacobianEvaluations += res.jacobians;
+      let res: NewtonResult | undefined;
+      if (blt) {
+        const zb = new Float64Array(z);
+        const br = solveInitializationBlockwise(sys, blt, problem, zb, freeStates);
+        sys.stats.newtonIterations += br.iterations;
+        sys.stats.jacobianEvaluations += br.jacobians;
+        if (br.converged) {
+          z.set(zb);
+          res = br;
+        } else {
+          sys.log('debug', `Initialization: block-wise solve failed (${br.failedBlock ?? 'unknown block'}); retrying with the simultaneous Newton`);
+          problem.residual(z, new Float64Array(nEq + nInit));
+        }
+      }
+      if (!res) {
+        res = solveWithStrategies(sys, problem, z, z0, cache);
+        sys.stats.newtonIterations += res.iterations;
+        sys.stats.jacobianEvaluations += res.jacobians;
+      }
       if (!res.converged) throw initializationFailure(sys, res, problem, z, unknownName);
       if (res.relaxed) sys.log('warning', `Initialization converged only to a relaxed tolerance (scaled step ${fmt(res.stepNorm)})`);
       // Sync v/dv with the solution.

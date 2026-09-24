@@ -1,10 +1,12 @@
 /**
  * DAE simulation engine: `simulate(flat, options, hooks)`.
  *
- * Pipeline: `compile.ts` (residual closures) -> `init.ts` (initial system) -> integrator from
- * `integrators.ts` stepping until `finalTime`, with `events.ts` locating and handling state
- * and time events after every accepted step, and `output.ts` collecting the trajectories at
- * the communication points (plus pre-/post-event points).
+ * Pipeline: `structural/` (alias elimination, propagation of known variables, index
+ * reduction) -> `compile.ts` (residual closures) -> `init.ts` (initial system, solved block-wise)
+ * -> integrator from `integrators.ts` stepping until `finalTime`, with `events.ts` locating and
+ * handling state and time events after every accepted step, and `output.ts` collecting the
+ * trajectories at the communication points (plus pre-/post-event points) and expanding them to
+ * the variables of the original model.
  *
  * Throws `ModelicaError` for structural problems (unbalanced model, unsupported constructs),
  * initialisation failures and numerical failures during integration (NaN/Infinity, step size
@@ -12,12 +14,13 @@
  */
 import { ModelicaError } from '../ast.js';
 import type { FlatModel } from '../flat.js';
-import { DEFAULT_SIMULATION_OPTIONS, type LogMessage, type SimulationOptions, type SimulationResult, type SimulationStats, type Trajectory } from '../simulation.js';
+import { DEFAULT_SIMULATION_OPTIONS, normalizeSolverName, type LogMessage, type SimulationOptions, type SimulationResult, type SimulationStats } from '../simulation.js';
 import { compileModel } from './compile.js';
 import { EventHandler, EVENT_TIME_TOL } from './events.js';
 import { initialize } from './init.js';
 import { createIntegrator } from './integrators.js';
-import { Recorder } from './output.js';
+import { buildTrajectories, expandTrajectories, Recorder } from './output.js';
+import { prepareModel, type PreparedModel } from './structural/index.js';
 import { fmt, System, type LogFn } from './system.js';
 
 export interface SimulationHooks {
@@ -29,6 +32,8 @@ export interface SimulationHooks {
 
 export { compileModel } from './compile.js';
 export type { CompiledModel } from './compile.js';
+export { prepareModel } from './structural/index.js';
+export type { PreparedModel, AliasEntry, AliasMap } from './structural/index.js';
 
 function now(): number {
   return typeof performance !== 'undefined' ? performance.now() : Date.now();
@@ -46,6 +51,9 @@ export function simulate(flat: FlatModel, options: SimulationOptions, hooks?: Si
   }
   if (!(opts.ncp >= 0) || !Number.isFinite(opts.ncp)) opts.ncp = DEFAULT_SIMULATION_OPTIONS.ncp;
   opts.ncp = Math.floor(opts.ncp);
+  if (!normalizeSolverName(opts.solver)) {
+    throw new ModelicaError(`Unknown solver '${String(opts.solver)}' (expected CVode, Radau5, Implicit Euler, Explicit Euler or Runge-Kutta)`);
+  }
 
   const log: LogMessage[] = [];
   const logFn: LogFn = (level, message) => {
@@ -67,7 +75,14 @@ export function simulate(flat: FlatModel, options: SimulationOptions, hooks?: Si
   };
 
   try {
-    const m = compileModel(flat, opts);
+    let prep: PreparedModel | undefined;
+    if (!opts.disableStructuralSimplification) {
+      prep = prepareModel(flat, logFn, opts);
+      stats.aliasEliminated = prep.stats.aliasEliminated;
+      stats.propagated = prep.stats.propagated;
+      stats.dummyStates = prep.dummyStates;
+    }
+    const m = compileModel(prep ? prep.model : flat, opts);
     for (const w of m.warnings) logFn('warning', w);
     const sys = new System(m, opts, stats, logFn);
     const recorder = new Recorder(sys, logFn);
@@ -174,7 +189,7 @@ export function simulate(flat: FlatModel, options: SimulationOptions, hooks?: Si
       className: flat.className,
       options: opts,
       time: recorder.time,
-      trajectories: buildTrajectories(sys, recorder),
+      trajectories: expandTrajectories(buildTrajectories(sys, recorder), flat, prep),
       stats,
       log,
     };
@@ -183,49 +198,4 @@ export function simulate(flat: FlatModel, options: SimulationOptions, hooks?: Si
     if (e instanceof ModelicaError) logFn('error', e.message);
     throw e;
   }
-}
-
-function buildTrajectories(sys: System, recorder: Recorder): Trajectory[] {
-  const m = sys.m;
-  const out: Trajectory[] = [];
-  const paramByName = new Map(m.parameters.map((p) => [p.variable.name, p]));
-  for (const variable of m.flat.variables) {
-    const i = m.index.get(variable.name);
-    if (i !== undefined) {
-      const u = m.unknowns[i];
-      const discrete = u.kind === 'discrete' || variable.variability === 'discrete' || u.type !== 'Real';
-      out.push({
-        name: u.name,
-        values: recorder.values[i],
-        kind: discrete ? 'discrete' : 'continuous',
-        unit: variable.attributes.unit,
-        displayUnit: variable.attributes.displayUnit,
-        description: variable.description,
-      });
-      if (u.kind === 'state') {
-        out.push({
-          name: `der(${u.name})`,
-          values: recorder.derivatives[i],
-          kind: 'derivative',
-          unit: variable.attributes.unit ? `${variable.attributes.unit}/s` : undefined,
-          description: `der(${u.name})`,
-        });
-      }
-      continue;
-    }
-    const p = paramByName.get(variable.name);
-    if (p) {
-      const value = typeof p.value === 'number' ? p.value : typeof p.value === 'boolean' ? (p.value ? 1 : 0) : NaN;
-      if (Number.isNaN(value) && typeof p.value === 'string') continue;
-      out.push({
-        name: variable.name,
-        values: [value],
-        kind: variable.variability === 'constant' ? 'constant' : 'parameter',
-        unit: variable.attributes.unit,
-        displayUnit: variable.attributes.displayUnit,
-        description: variable.description,
-      });
-    }
-  }
-  return out;
 }
