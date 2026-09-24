@@ -35,6 +35,7 @@ export const ComponentNode = memo(function ComponentNode({ component, selected, 
   const [[x1, y1], [x2, y2]] = normalizeExtent(component.icon.coordinateSystem.extent);
   const w = x2 - x1;
   const h = y2 - y1;
+  if (component.placement.visible === false) return null;
 
   let ownCompatibility: PortCompatibility | undefined;
   if (connectFrom && component.isConnector) {

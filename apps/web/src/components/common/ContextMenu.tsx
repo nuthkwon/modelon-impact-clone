@@ -201,8 +201,8 @@ export function ContextMenuHost() {
 
   if (!open) return null;
   return (
-    <div ref={ref} style={{ position: 'fixed', left: pos.left, top: pos.top, zIndex: 1000 }} onContextMenu={(e) => e.preventDefault()}>
-      <MenuList items={items} onClose={close} />
+    <div ref={ref} className="menu" style={{ left: pos.left, top: pos.top }} onContextMenu={(e) => e.preventDefault()}>
+      <MenuList chrome={false} items={items} onClose={close} />
     </div>
   );
 }

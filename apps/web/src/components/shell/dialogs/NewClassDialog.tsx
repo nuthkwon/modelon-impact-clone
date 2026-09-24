@@ -143,7 +143,8 @@ export function NewClassDialog({ parent, onClose }: { parent?: string; onClose: 
       if (after.registry.has(created)) {
         after.openClass(created);
         after.setMode('model');
-        if (after.view !== 'diagram' && type !== 'model' && type !== 'block' && type !== 'connector') after.setView('code');
+        if (type === 'function' || type === 'type') after.setView('code');
+        else if (after.view === 'code') after.setView('diagram');
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

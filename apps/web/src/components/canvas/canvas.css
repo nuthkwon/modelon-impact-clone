@@ -146,9 +146,19 @@
   font-size: 12px;
   white-space: pre-wrap;
 }
-.canvas-chip {
+.canvas-top {
   position: absolute;
-  z-index: 6;
+  left: 0;
+  right: 0;
+  top: 0;
+  z-index: 8;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  pointer-events: none;
+}
+.canvas-top > * { pointer-events: auto; }
+.canvas-chip {
   height: 24px;
   display: inline-flex;
   align-items: center;
@@ -160,8 +170,7 @@
   border: 1px solid var(--border);
   box-shadow: var(--shadow-1);
 }
-.read-only-chip { left: 12px; top: 12px; }
-.canvas-banners:not(:empty) ~ .read-only-chip { top: auto; }
+.read-only-chip { margin: 12px; }
 
 .zoom-readout {
   position: absolute;
@@ -180,11 +189,7 @@
 
 /* ------------------------------------------------------------------ banners */
 .canvas-banners {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 0;
-  z-index: 8;
+  width: 100%;
   display: flex;
   flex-direction: column;
   gap: 1px;
@@ -282,8 +287,7 @@
   display: none;
   position: absolute;
   right: 0;
-  top: 100%;
-  margin-top: 4px;
+  top: calc(100% - 2px); /* contiguous with the button so hover is not lost in a gap */
   min-width: 200px;
   z-index: 20;
 }

@@ -204,6 +204,19 @@ export function CodeView() {
     view.dispatch({ effects: setErrorLine.of(diagnostic?.loc?.line ?? null) });
   }, [diagnostic, activeClass]);
 
+  // Ctrl+S anywhere in the page while the Code view is shown (the editor keymap handles it when focused).
+  useEffect(() => {
+    if (!activeClass || readOnly) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || !(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 's' || e.altKey || e.shiftKey) return;
+      e.preventDefault();
+      const view = viewRef.current;
+      if (view) void save(activeClass, view.state.doc.toString());
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [activeClass, readOnly, save]);
+
   const gotoLine = useCallback((line: number) => {
     const view = viewRef.current;
     if (!view) return;

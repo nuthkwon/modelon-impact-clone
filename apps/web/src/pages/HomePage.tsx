@@ -140,10 +140,14 @@ export function HomePage({ navigate }: { navigate: (path: string) => void }) {
     }
   };
 
-  const rowMenu = (e: ReactMouseEvent<HTMLButtonElement>, ws: Workspace) => {
+  const rowMenu = (e: ReactMouseEvent<HTMLElement>, ws: Workspace) => {
+    e.preventDefault();
     e.stopPropagation();
+    const isRow = e.currentTarget.classList.contains('ws-row');
     const r = e.currentTarget.getBoundingClientRect();
-    menu.openAt(r.right - 200, r.bottom + 4, [
+    const x = isRow ? e.clientX : r.right - 200;
+    const y = isRow ? e.clientY : r.bottom + 4;
+    menu.openAt(x, y, [
       { label: 'Open', icon: <OpenInNewIcon />, onSelect: () => open(ws) },
       { label: 'Rename…', icon: <EditIcon />, onSelect: () => setRenaming(ws) },
       { separator: true },
@@ -234,9 +238,23 @@ export function HomePage({ navigate }: { navigate: (path: string) => void }) {
             </div>
           )}
           {workspaces && workspaces.length > 0 && (
-            <div className="ws-list" role="list">
+            <div className="ws-list">
               {workspaces.map((ws) => (
-                <button key={ws.id} type="button" role="listitem" className="ws-row" onClick={() => open(ws)} onContextMenu={(e) => rowMenu(e as unknown as ReactMouseEvent<HTMLButtonElement>, ws)}>
+                <div
+                  key={ws.id}
+                  role="button"
+                  tabIndex={0}
+                  className="ws-row"
+                  onClick={() => open(ws)}
+                  onKeyDown={(e) => {
+                    if (e.target !== e.currentTarget) return;
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      open(ws);
+                    }
+                  }}
+                  onContextMenu={(e) => rowMenu(e, ws)}
+                >
                   <span className="ws-icon">
                     <StorageIcon size={22} />
                   </span>
@@ -248,10 +266,10 @@ export function HomePage({ navigate }: { navigate: (path: string) => void }) {
                     <span>Last modified {formatDate(ws.definition.updatedAt)}</span>
                     <span>{formatBytes(ws.sizeInfo?.total)}</span>
                   </span>
-                  <span className="icon-button ws-menu" role="button" tabIndex={0} aria-label="Workspace actions" onClick={(e) => rowMenu(e as unknown as ReactMouseEvent<HTMLButtonElement>, ws)} onKeyDown={(e) => e.key === 'Enter' && rowMenu(e as unknown as ReactMouseEvent<HTMLButtonElement>, ws)}>
+                  <button type="button" className="icon-button ws-menu" aria-label="Workspace actions" aria-haspopup="menu" onClick={(e) => rowMenu(e, ws)}>
                     <MoreVertIcon />
-                  </span>
-                </button>
+                  </button>
+                </div>
               ))}
             </div>
           )}

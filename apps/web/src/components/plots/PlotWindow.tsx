@@ -216,7 +216,6 @@ export function PlotWindowView({ className, plot, canvasRef }: PlotWindowViewPro
   const onDragOver = (e: DragEvent<HTMLDivElement>) => {
     if (!hasVariableDrag(e.dataTransfer)) return;
     e.preventDefault();
-    e.stopPropagation();
     e.dataTransfer.dropEffect = 'copy';
     const z = zoneAt(e);
     if (z !== dragZone) setDragZone(z);

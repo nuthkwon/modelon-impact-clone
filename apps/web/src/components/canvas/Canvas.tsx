@@ -181,9 +181,10 @@ export function Canvas(): JSX.Element {
 
       {activeClass && <Stickies vp={viewport.vp} readOnly={readOnly} />}
 
-      <ErrorBanners />
-
-      {readOnly && activeClass && <div className="canvas-chip read-only-chip">{libraryReadOnly ? 'Library class' : 'Read-only'}</div>}
+      <div className="canvas-top">
+        <ErrorBanners />
+        {readOnly && activeClass && <div className="canvas-chip read-only-chip">{libraryReadOnly ? 'Library class' : 'Read-only'}</div>}
+      </div>
 
       <div className="canvas-fabs">
         <ExecutionFab />

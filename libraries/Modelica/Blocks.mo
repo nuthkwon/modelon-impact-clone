@@ -112,8 +112,8 @@ der(inertia1.w) = 0, der(spring.w_rel) = 0 and der(PI.x) = 0 together with the f
 of inertia1.phi and spring.w_rel.
 </p>
 </html>"));
-      // balance (flattened): 45 unknowns (PI 3, inertia1 7, torque 4, spring 10, inertia2 7, speedRef 2,
-      // feedback 3, speedSensor 3, loadTorque 6) and 45 equations (32 component equations,
+      // balance (flattened): 46 unknowns (PI 3, inertia1 7, torque 4, spring 11, inertia2 7, speedRef 2,
+      // feedback 3, speedSensor 3, loadTorque 6) and 46 equations (33 component equations,
       // 4 signal connections, 9 flange connection equations from 4 connection sets with 9 flanges);
       // 5 initial conditions: inertia1.phi (fixed), spring.w_rel (fixed) + 3 initial equations.
     end PID_Controller;

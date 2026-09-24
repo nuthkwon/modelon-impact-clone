@@ -157,15 +157,17 @@ export function useInteractions({ svgRef, diagram, viewport, readOnly, anchors, 
         setSpaceHeld(false);
       }
     };
-    window.addEventListener('keydown', down);
-    window.addEventListener('keyup', up);
-    window.addEventListener('blur', () => {
+    const blur = () => {
       spaceRef.current = false;
       setSpaceHeld(false);
-    });
+    };
+    window.addEventListener('keydown', down);
+    window.addEventListener('keyup', up);
+    window.addEventListener('blur', blur);
     return () => {
       window.removeEventListener('keydown', down);
       window.removeEventListener('keyup', up);
+      window.removeEventListener('blur', blur);
     };
   }, []);
 

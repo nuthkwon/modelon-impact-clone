@@ -3,7 +3,7 @@
  * is mirrored into the store (`viewports[className]`, debounced) so it survives class switches.
  * On class open the stored viewport is restored, otherwise the diagram extent is fitted.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 import type { Extent, Point } from '@impact/core';
 import { useStore } from '../../store';
@@ -66,8 +66,8 @@ export function useViewport(containerRef: RefObject<HTMLElement | null>, classNa
     setVp(fitViewport(ext, width, height, FIT_PADDING));
   }, []);
 
-  // Restore or fit when the class changes.
-  useEffect(() => {
+  // Restore or fit when the class changes (before paint, so the new diagram never shows with the old viewport).
+  useLayoutEffect(() => {
     if (!className) {
       initializedFor.current = undefined;
       return;

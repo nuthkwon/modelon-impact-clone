@@ -65,8 +65,8 @@ in the housing on one side via component Fixed.</p>
 fixed to ground (no support connectors on this platform).</p>
 </html>"),
           experiment(StopTime=1.0, Interval=0.001));
-        // balance (flattened): 49 unknowns (fixed 2, torque 4, inertia1 7, idealGear 7, inertia2 7, spring 6,
-        // inertia3 7, damper 8, sine 1), 49 equations (34 component equations, 1 signal connection,
+        // balance (flattened): 50 unknowns (fixed 2, torque 4, inertia1 7, idealGear 7, inertia2 7, spring 6,
+        // inertia3 7, damper 9, sine 1), 50 equations (35 component equations, 1 signal connection,
         // 13 flange connection equations from 6 connection sets with 13 flanges, 1 zero-flow equation for
         // the unconnected inertia3.flange_b)
       end First;
@@ -1335,8 +1335,8 @@ If damping is added the amplitudes are bounded.
 </p>
 </html>"),
           experiment(StopTime=1.0, Interval=0.001));
-        // balance (flattened): 51 unknowns (mass1 7, spring1 6, fixed1 2, force1 5, sine1 1, mass2 7, spring2 6,
-        // fixed2 2, force2 5, sine2 1, damper1 9), 51 equations (35 component equations, 2 signal connections,
+        // balance (flattened): 50 unknowns (mass1 7, spring1 6, fixed1 2, force1 5, sine1 1, mass2 7, spring2 6,
+        // fixed2 2, force2 5, sine2 1, damper1 8), 50 equations (34 component equations, 2 signal connections,
         // 14 flange connection equations from 6 connection sets with 14 flanges)
       end Oscillator;
 
@@ -1536,8 +1536,7 @@ the dissipated power is available as variable lossPower.
                 extent={{-150,-45},{150,-75}},
                 textString="d=%d"),
               Line(points={{60,-30},{-60,-30},{-60,30},{60,30}}, color={0,127,0})}));
-        // balance: 9 unknowns (4 flange variables, s_rel, v_rel, f, lossPower + a_rel is not present: 8 + lossPower),
-        // exactly: flange_a.s, flange_a.f, flange_b.s, flange_b.f, s_rel, v_rel, f, lossPower = 8 unknowns,
+        // balance: 8 unknowns (flange_a.s, flange_a.f, flange_b.s, flange_b.f, s_rel, v_rel, f, lossPower),
         // 2 flow variables provided by connections, 6 equations (4 base + 2)
       end Damper;
 

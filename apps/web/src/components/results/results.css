@@ -57,7 +57,7 @@
 .var-action.star.on { color: var(--orange); }
 
 /* CALCULATED VALUES ------------------------------------------------------ */
-.calc-tab { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.calc-tab { display: flex; flex-direction: column; flex: 1 1 auto; height: 100%; min-height: 0; }
 .calc-case-row {
   display: flex; align-items: center; gap: 8px; padding: 8px 12px 0; font-size: 12px; color: var(--text-secondary);
 }
