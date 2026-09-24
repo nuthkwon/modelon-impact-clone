@@ -10,7 +10,7 @@
  */
 import type { EditOperation, Placement, Point, Transformation } from '@impact/core';
 import { badRequest } from './errors.js';
-import { optionalNumber, optionalString, requireClassName, requireObject, requireString, requireStringArray, type Json } from './validate.js';
+import { optionalNumber, optionalString, requireClassName, requireObject, requireString, requireStringArray } from './validate.js';
 
 function requireNumber(value: unknown, what: string): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) throw badRequest(`${what} must be a number`);
@@ -149,5 +149,3 @@ export function parseEditOp(value: unknown): EditOperation {
       throw badRequest(`Unknown edit operation '${kind}'; expected one of ${EDIT_OP_NAMES.join(', ')}`);
   }
 }
-
-export type { Json };

@@ -348,6 +348,8 @@ export class JobRunner {
             if (modifierEntries.length) lines.push(`Parameters: ${modifierEntries.map(([k, v]) => `${k}=${String(v)}`).join(', ')}`);
             lines.push(...statsLines(stats));
             for (const d of diagnostics) lines.push(`${d.severity === 'error' ? 'Error' : d.severity === 'warning' ? 'Warning' : 'Info'}: ${formatDiagnostic(d)}`);
+            // Persist the header while the solver runs so the log endpoint shows what is simulating.
+            this.storage.writeCaseLog(wid, eid, c.id, lines.join('\n') + '\n');
           },
           onProgress: (progress) => {
             job.progress = Math.min(1, (index + Math.max(0, Math.min(1, progress))) / total);

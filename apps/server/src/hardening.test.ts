@@ -498,7 +498,10 @@ describe.skipIf(!PARSER_OK)('worker-thread simulation (real engine)', () => {
     const created = await api<ExperimentDto>(t.base, 'POST', `/api/workspaces/${wid}/experiments`, definition({}, { parameters: { start_time: 0, final_time: 1000 }, solverOptions: { solver: 'ExplicitEuler', step_size: 1e-9 } }));
     const eid = created.body.id;
     expect((await api(t.base, 'POST', execution(wid, eid))).status).toBe(202);
-    await waitFor(async () => (await api<CaseDto>(t.base, 'GET', `/api/workspaces/${wid}/experiments/${eid}/cases/case_1`)).body.run_info.status === 'started', 30_000, 25);
+    const caseLog = async () => (await api<{ log: string }>(t.base, 'GET', `/api/workspaces/${wid}/experiments/${eid}/cases/case_1/log`)).body.log;
+    // The header is persisted once the worker has flattened, i.e. the solver is now running.
+    await waitFor(async () => (await caseLog()).includes('Simulating Examples.Simple from t=0 to t=1000'), 30_000, 25);
+    expect((await api<CaseDto>(t.base, 'GET', `/api/workspaces/${wid}/experiments/${eid}/cases/case_1`)).body.run_info.status).toBe('started');
     // Give the worker time to be deep inside simulate(), then prove the event loop is free.
     await new Promise((r) => setTimeout(r, 300));
     for (let i = 0; i < 3; i++) {
