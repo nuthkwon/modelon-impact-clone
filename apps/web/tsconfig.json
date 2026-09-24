@@ -8,8 +8,11 @@
     "composite": false,
     "declaration": false,
     "declarationMap": false,
-    "types": ["vite/client"]
+    "types": [
+      "vite/client"
+    ]
   },
-  "include": ["src"],
-  "references": [{ "path": "../../packages/core" }, { "path": "../../packages/protocol" }]
+  "include": [
+    "src"
+  ]
 }

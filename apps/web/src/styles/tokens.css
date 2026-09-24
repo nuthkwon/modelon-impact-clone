@@ -1,0 +1,98 @@
+/* Design tokens — see docs/UI_SPEC.md §9. Dark mode is opt-in via html[data-theme="dark"]. */
+:root {
+  --nav-bg: #1e1e1e;
+  --nav-fg: #ffffff;
+  --nav-fg-muted: rgba(255, 255, 255, 0.7);
+  --accent: #1976d2;
+  --accent-hover: #1565c0;
+  --accent-fg: #ffffff;
+  --orange: #ff9800;
+  --orange-hover: #fb8c00;
+  --canvas-bg: #ffffff;
+  --grid-dot: #d9d9d9;
+  --panel-bg: #fafafa;
+  --surface: #ffffff;
+  --surface-2: #f5f5f5;
+  --border: #e0e0e0;
+  --border-strong: #bdbdbd;
+  --hover: rgba(0, 0, 0, 0.04);
+  --active: rgba(0, 0, 0, 0.08);
+  --selection-bg: #e3f2fd;
+  --experiment-bg: #e3f2fd;
+  --experiment-border: #90caf9;
+  --text-primary: rgba(0, 0, 0, 0.87);
+  --text-secondary: rgba(0, 0, 0, 0.6);
+  --text-disabled: rgba(0, 0, 0, 0.38);
+  --error: #d32f2f;
+  --error-bg: #fdecea;
+  --warning: #f57c00;
+  --warning-bg: #fff3e0;
+  --success: #388e3c;
+  --port-compatible: #43a047;
+  --port-incompatible: #bdbdbd;
+  --shadow-1: 0 1px 3px rgba(0, 0, 0, 0.2);
+  --shadow-2: 0 2px 8px rgba(0, 0, 0, 0.24);
+  --shadow-3: 0 6px 20px rgba(0, 0, 0, 0.28);
+  --font: Roboto, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "JetBrains Mono", "Fira Code", Consolas, "Liberation Mono", monospace;
+  --font-size: 13px;
+  --nav-height: 48px;
+  --radius: 4px;
+  --plot-grid: #e5e5e5;
+  --plot-axis: #444444;
+  --plot-c1: #1f77b4;
+  --plot-c2: #ff7f0e;
+  --plot-c3: #2ca02c;
+  --plot-c4: #d62728;
+  --plot-c5: #9467bd;
+  --plot-c6: #8c564b;
+  --plot-c7: #e377c2;
+  --plot-c8: #7f7f7f;
+  --plot-c9: #bcbd22;
+  --plot-c10: #17becf;
+  color-scheme: light;
+}
+
+html[data-theme="dark"] {
+  --nav-bg: #121212;
+  --accent: #64b5f6;
+  --accent-hover: #90caf9;
+  --accent-fg: #0d1b2a;
+  --orange: #ffb74d;
+  --orange-hover: #ffa726;
+  --grid-dot: #444444;
+  --panel-bg: #1e1e1e;
+  --surface: #252526;
+  --surface-2: #2d2d2d;
+  --border: #3c3c3c;
+  --border-strong: #5a5a5a;
+  --hover: rgba(255, 255, 255, 0.06);
+  --active: rgba(255, 255, 255, 0.12);
+  --selection-bg: #1e3a5f;
+  --experiment-bg: #1e3a5f;
+  --experiment-border: #3a6ea5;
+  --text-primary: rgba(255, 255, 255, 0.87);
+  --text-secondary: rgba(255, 255, 255, 0.6);
+  --text-disabled: rgba(255, 255, 255, 0.38);
+  --error: #ef5350;
+  --error-bg: #4a1f1f;
+  --warning: #ffb74d;
+  --warning-bg: #4a3a1f;
+  --success: #81c784;
+  --shadow-1: 0 1px 3px rgba(0, 0, 0, 0.6);
+  --shadow-2: 0 2px 8px rgba(0, 0, 0, 0.7);
+  --shadow-3: 0 6px 20px rgba(0, 0, 0, 0.8);
+  --plot-grid: #3c3c3c;
+  --plot-axis: #cccccc;
+  color-scheme: dark;
+}
+
+/* Canvas and plots keep a bright background in dark mode unless explicitly included. */
+html[data-theme="dark"]:not([data-dark-canvas="true"]) {
+  --canvas-bg: #ffffff;
+  --grid-dot: #d9d9d9;
+}
+html[data-theme="dark"][data-dark-canvas="true"] {
+  --canvas-bg: #1a1a1a;
+  --grid-dot: #444444;
+}
