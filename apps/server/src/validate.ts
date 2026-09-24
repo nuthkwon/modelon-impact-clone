@@ -1,4 +1,5 @@
 /** Tiny request validation helpers; every failure is a 400 `validation_error`. */
+import type { Router } from 'express';
 import { badRequest } from './errors.js';
 
 export type Json = Record<string, unknown>;
@@ -55,4 +56,36 @@ export function queryString(value: unknown): string | undefined {
 export function requireStringArray(value: unknown, what: string): string[] {
   if (!Array.isArray(value) || !value.every((v) => typeof v === 'string')) throw badRequest(`${what} must be an array of strings`);
   return value as string[];
+}
+
+/** Strict resource id (workspace, project, experiment, case, executable, library): no `.`, `/` or `\\`. */
+export const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+
+export function isValidId(value: unknown): value is string {
+  return typeof value === 'string' && ID_RE.test(value);
+}
+
+export function requireId(value: unknown, what: string): string {
+  if (!isValidId(value)) throw badRequest(`${what} must be an id matching ${ID_RE.source}`);
+  return value;
+}
+
+/** Route parameters that carry resource ids. */
+export const ID_PARAMS = ['wid', 'pid', 'eid', 'cid', 'fid', 'lid'] as const;
+
+/**
+ * Rejects malformed id route params with 400 before any handler runs. Express 5 decodes
+ * `%2F`, so without this `ws_x%2F.` or `..%2F..%2Fx` would reach the storage layer — and the
+ * job/registry caches keyed by the raw string — as another spelling of a directory.
+ */
+export function validateIdParams(router: Router, names: readonly string[] = ID_PARAMS): void {
+  for (const name of names) {
+    router.param(name, (_req, _res, next, value: unknown) => {
+      if (!isValidId(value)) {
+        next(badRequest(`Route parameter '${name}' must be an id matching ${ID_RE.source}`));
+        return;
+      }
+      next();
+    });
+  }
 }

@@ -122,6 +122,8 @@ export interface Ctx {
   usedModifiers: Set<string>;
   /** Equations produced from when-clauses assign these variables (they become discrete). */
   whenTargets: Set<string>;
+  /** Number of hidden `$whenConditionN` Boolean variables created for `elsewhen` priorities. */
+  whenConditionHelpers: number;
 }
 
 export interface DiagOptions {

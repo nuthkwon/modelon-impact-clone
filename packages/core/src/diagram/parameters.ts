@@ -151,24 +151,60 @@ function collectRawParameters(registry: ClassRegistry, cache: RegistryCache, cla
 // ---------------------------------------------------------------------------
 
 /**
+ * Record-typed parameters of `className`, flattened one level by `collectRawParameters`
+ * (`data` for `data.a`): the keys whose record-constructor bindings are expanded into fields.
+ */
+function recordParameterNames(registry: ClassRegistry, cache: RegistryCache, className: string): Set<string> {
+  const out = new Set<string>();
+  for (const raw of collectRawParameters(registry, cache, className)) {
+    const dot = raw.name.lastIndexOf('.');
+    if (dot > 0) out.add(raw.name.slice(0, dot));
+  }
+  return out;
+}
+
+/**
+ * Expands a record-constructor binding of a record-typed parameter into its fields, so that
+ * `m(data = Data(a=3))` reads like `m(data(a=3))` (`data.a`). Explicit dotted entries of the same
+ * modification level win over the constructor's fields, as on a declaration
+ * (`data(b=6) = Data(a=5)`). Bindings of other keys (function calls) are left alone.
+ */
+function expandRecordConstructors(mods: FlatMods, recordKeys: ReadonlySet<string>): FlatMods {
+  if (recordKeys.size === 0 || mods.size === 0) return mods;
+  let out: FlatMods | undefined;
+  for (const [key, mod] of mods) {
+    if (!recordKeys.has(key) || mod.expr.kind !== 'call') continue;
+    for (const [field, fieldMod] of recordConstructorMods(mod.expr)) {
+      const path = `${key}.${field}`;
+      if (mods.has(path)) continue;
+      (out ??= new Map(mods)).set(path, { expr: fieldMod.expr, final: mod.final });
+    }
+  }
+  return out ?? mods;
+}
+
+/**
  * Modifiers applying to component `owner.componentName` as seen from `owner.ownerClassName`:
  * the declaration's own modification (lowest priority) plus the `extends` modifications on the
  * path from the owner down to the declaring class (`extends Base(comp(R=5))`), outermost winning.
- * Keys are dotted paths relative to the component (`R`, `R.start`, `data.a`).
+ * Keys are dotted paths relative to the component (`R`, `R.start`, `data.a`); record-constructor
+ * bindings of record-typed parameters (`data = Data(a=3)`) also appear as fields (`data.a`).
  */
 export function ownerModifiers(registry: ClassRegistry, cache: RegistryCache, owner: ParameterOwner): FlatMods {
   return cache.memo('ownerModifiers', `${owner.ownerClassName}\u0000${owner.componentName}`, (): FlatMods => {
     const ic = findComponent(registry, cache, owner.ownerClassName, owner.componentName);
     if (!ic) return new Map();
-    let mods = flattenMods(ic.decl.modification?.mods);
+    const t = resolveTypeName(registry, cache, ic.decl.typeName, ic.declaringClass.fullName);
+    const recordKeys = t.kind === 'unresolved' || t.kind === 'builtin' ? new Set<string>() : recordParameterNames(registry, cache, t.fullName);
+    let mods = expandRecordConstructors(flattenMods(ic.decl.modification?.mods), recordKeys);
     if (ic.declaringClass.fullName !== owner.ownerClassName) {
       const path = extendsPath(registry, owner.ownerClassName, ic.declaringClass.fullName) ?? [];
       // Closest to the declaring class first, the owner's own extends clause last (highest priority).
       for (let i = path.length - 1; i >= 0; i--) {
         const all = flattenMods(path[i].modification?.mods);
         const { binding, sub } = splitMods(all, owner.componentName);
-        mods = mergeMods(mods, sub);
-        if (binding) mods = mergeMods(mods, recordConstructorMods(binding.expr));
+        mods = mergeMods(mods, expandRecordConstructors(sub, recordKeys));
+        if (binding) mods = mergeMods(mods, expandRecordConstructors(recordConstructorMods(binding.expr), recordKeys));
       }
     }
     return mods;

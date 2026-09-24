@@ -83,7 +83,12 @@ interface Fields {
   positional: Expr[];
 }
 
-/** Expands dotted modifier names (`transformation.rotation = 90`) into nested modifiers. */
+/**
+ * Expands dotted modifier names (`transformation.rotation = 90`) into nested modifiers.
+ *
+ * The input belongs to the registry's AST and is read on every render, so it is never mutated:
+ * a modifier that receives dotted entries is replaced in the result by a fresh copy.
+ */
 function expandDotted(mods: Modifier[]): Modifier[] {
   if (!mods.some((m) => m.name.includes('.'))) return mods;
   const out: Modifier[] = [];
@@ -95,9 +100,10 @@ function expandDotted(mods: Modifier[]): Modifier[] {
     }
     const head = m.name.slice(0, dot);
     const rest: Modifier = { name: m.name.slice(dot + 1), modification: m.modification };
-    const existing = out.find((o) => o.name === head);
-    if (existing) {
-      existing.modification = { ...existing.modification, mods: [...existing.modification.mods, rest] };
+    const idx = out.findIndex((o) => o.name === head);
+    if (idx >= 0) {
+      const existing = out[idx];
+      out[idx] = { ...existing, modification: { ...existing.modification, mods: [...(existing.modification.mods ?? []), rest] } };
     } else {
       out.push({ name: head, modification: { mods: [rest] } });
     }

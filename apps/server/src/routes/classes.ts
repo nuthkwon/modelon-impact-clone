@@ -12,14 +12,15 @@
  *   GET    /:wid/classes/:className/documentation   Documentation annotation
  */
 import { Router } from 'express';
-import { applyEdit, buildClassTree, buildDiagramView, getParameters, parse, parseDocumentation, searchClasses, tokenize, type ClassTreeNode, type EditOperation, type RegisteredClass } from '@impact/core';
+import { applyEdit, buildClassTree, buildDiagramView, getParameters, parse, parseDocumentation, searchClasses, tokenize, type ClassTreeNode, type EditResult, type RegisteredClass } from '@impact/core';
 import type { ClassSourceDto, ClassTreeNodeDto, CreateClassRequest, ItemsResponse } from '@impact/protocol';
 import type { AppContext } from '../context.js';
-import { conflict, diagnosticsOf, notFound, readOnly, unprocessable } from '../errors.js';
+import { parseEditOp } from '../edit-ops.js';
+import { HttpError, badRequest, conflict, diagnosticsOf, notFound, readOnly, unprocessable } from '../errors.js';
 import { readText } from '../fsutil.js';
 import type { ClassFileHit, LibraryEntry, LoadedFile, WorkspaceRegistry } from '../registry-cache.js';
 import path from 'node:path';
-import { optionalEnum, optionalNumber, optionalString, queryString, requireClassName, requireObject, requireString } from '../validate.js';
+import { optionalEnum, optionalNumber, optionalString, queryString, requireClassName, requireObject, requireString, validateIdParams } from '../validate.js';
 
 const RESTRICTIONS = ['model', 'package', 'block', 'connector', 'record', 'type', 'function'] as const;
 
@@ -188,6 +189,7 @@ function requireClass(wr: WorkspaceRegistry, className: string): RegisteredClass
 
 export function classRoutes(ctx: AppContext): Router {
   const router = Router();
+  validateIdParams(router);
 
   // -- tree & search -----------------------------------------------------------------------
 
@@ -313,10 +315,19 @@ export function classRoutes(ctx: AppContext): Router {
         if (found) ctx.storage.removeContent(wid, found.project, lib.id);
         ctx.registries.removeLibrary(wr, lib.id);
       } else if (file.path.endsWith('package.mo')) {
-        // A sub-package directory.
+        // A sub-package directory: `Examples/Sub/` goes away and the parent's package.order drops `Sub`.
         const dir = file.path.slice(0, -'package.mo'.length);
         ctx.storage.deleteProjectDir(wid, pid, dir);
         for (const p of [...lib.files.keys()]) if (p.startsWith(dir)) ctx.registries.deleteFile(wr, lib, p);
+        const parentDir = dir.replace(/[^/]+\/$/, '');
+        const shortName = className.slice(className.lastIndexOf('.') + 1);
+        const order = readText(path.join(lib.containerDir, parentDir, 'package.order'));
+        if (order !== undefined) {
+          const kept = order.split(/\r?\n/).filter((l) => l.trim() !== shortName);
+          ctx.storage.writeProjectFile(wid, pid, `${parentDir}package.order`, `${kept.join('\n').replace(/\n+$/, '')}\n`);
+          const parentName = className.slice(0, className.lastIndexOf('.'));
+          if (parentName) wr.registry.setChildOrder(parentName, kept.map((l) => l.trim()).filter(Boolean));
+        }
       } else {
         ctx.storage.deleteProjectFile(wid, pid, file.path);
         ctx.registries.deleteFile(wr, lib, file.path);
@@ -345,13 +356,19 @@ export function classRoutes(ctx: AppContext): Router {
   router.post('/:wid/classes/:className/edit', (req, res) => {
     const { wid, className } = req.params;
     const body = requireObject(req.body, 'body');
-    const op = requireObject(body.op, 'op');
-    requireString(op.op, 'op.op');
+    const op = parseEditOp(body.op);
     const wr = ctx.registries.get(wid);
     const hit = requireHit(ctx, wr, className);
     if (hit.lib.readOnly) throw readOnly(`Class '${className}' belongs to the read-only library '${hit.lib.name}'`);
     if (!hit.cls) throw conflict(`Class '${className}' could not be parsed; fix its source first`, { diagnostics: hit.file.diagnostics });
-    const result = applyEdit(wr.registry, className, op as unknown as EditOperation);
+    let result: EditResult;
+    try {
+      result = applyEdit(wr.registry, className, op);
+    } catch (e) {
+      // The op shape is validated above; anything the editor still throws is about the request, not the server.
+      if (e instanceof HttpError || (e instanceof Error && e.name === 'ModelicaError')) throw e;
+      throw badRequest(`Edit '${op.op}' failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
     const errors = result.diagnostics.filter((d) => d.severity === 'error');
     if (errors.length) throw unprocessable(`Edit '${String(op.op)}' failed: ${errors[0].message}`, result.diagnostics);
     checkSyntax(result.text, hit.file.path);

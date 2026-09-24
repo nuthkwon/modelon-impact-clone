@@ -990,6 +990,11 @@ class Parser {
       break;
     }
     if (this.isOp('(')) {
+      // The grammar allows `a[1].f(x)`, but the call node only keeps the callee name; rather
+      // than silently dropping the subscripts (and re-printing a different expression) report it.
+      if (parts.some((p) => p.subscripts && p.subscripts.length > 0)) {
+        this.fail(`Function calls through subscripted component references (${parts.map((p) => (p.subscripts ? `${p.name}[...]` : p.name)).join('.')}(...)) are not supported`, start);
+      }
       const callee = (global ? '.' : '') + parts.map((p) => p.name).join('.');
       const { args, namedArgs } = this.parseCallArguments();
       return { kind: 'call', callee, args, namedArgs, loc: span(start.loc, this.last().loc) };

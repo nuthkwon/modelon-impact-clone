@@ -3,13 +3,13 @@
  *
  * Resolving icons, classifying component types and collecting parameters are pure functions of
  * the registry content. A `RegistryCache` is attached to a `ClassRegistry` instance through a
- * `WeakMap` and is thrown away whenever the registry's *stamp* (derived from the registered
- * files and their versions) changes, so callers never observe stale results after `addFile` /
- * `removeFile`.
+ * `WeakMap` and is thrown away whenever the registry's *stamp* (derived from the identity of the
+ * registered files) changes, so callers never observe stale results after `addFile` /
+ * `removeFile` / `removeLibrary`.
  *
  * Cached objects are shared between callers: consumers must treat them as read-only.
  */
-import type { ClassRegistry } from '../registry.js';
+import type { ClassRegistry, RegisteredFile } from '../registry.js';
 
 export class RegistryCache {
   private readonly slots = new Map<string, Map<string, unknown>>();
@@ -39,25 +39,34 @@ export class RegistryCache {
 
 const caches = new WeakMap<ClassRegistry, RegistryCache>();
 
-function hashString(seed: number, s: string): number {
-  let h = seed | 0;
-  for (let i = 0; i < s.length; i++) h = (Math.imul(h, 31) + s.charCodeAt(i)) | 0;
-  return h;
+/**
+ * Process-wide identity of every `RegisteredFile` object seen so far. `ClassRegistry.addFile`
+ * stores a fresh object on every (re-)registration, so a file's identity changes exactly when
+ * its content may have changed; the ids are never reused.
+ */
+const fileIds = new WeakMap<RegisteredFile, number>();
+let nextFileId = 1;
+
+function fileId(file: RegisteredFile): number {
+  let id = fileIds.get(file);
+  if (id === undefined) {
+    id = nextFileId++;
+    fileIds.set(file, id);
+  }
+  return id;
 }
 
 /**
- * A cheap fingerprint of the registry content: number of files, sum of their versions and a hash
- * of their keys. Any `addFile`/`removeFile`/`removeLibrary` changes it.
+ * A fingerprint of the registry content: the identities (and versions) of the registered files
+ * in registration order. Any `addFile`/`removeFile`/`removeLibrary` changes it — including a
+ * remove followed by a re-add of the same paths, which restarts the per-file version counter
+ * at 1 and therefore cannot be told apart by counting versions.
  */
 export function registryStamp(registry: ClassRegistry): string {
   const files = registry.listFiles();
-  let versions = 0;
-  let hash = 7;
-  for (const f of files) {
-    versions += f.version;
-    hash = hashString(hash, `${f.libraryId}::${f.path}`);
-  }
-  return `${files.length}:${versions}:${hash}`;
+  const parts: string[] = new Array(files.length);
+  for (let i = 0; i < files.length; i++) parts[i] = `${fileId(files[i])}.${files[i].version}`;
+  return `${files.length}:${parts.join(',')}`;
 }
 
 /** The cache attached to `registry`, replaced when the registry content changed since the last call. */

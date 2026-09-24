@@ -165,10 +165,13 @@ export class ClassRegistry {
         removed.add(name);
       }
     }
-    for (const name of removed) this.childrenMap.delete(name);
+    // Drop the removed classes from every children list. The list of a removed class is kept
+    // when it still holds children declared in other files (`within Parent;`): re-adding the
+    // parent's file (`indexClass`) preserves them; `children()` ignores lists of unknown parents.
     for (const [parent, names] of [...this.childrenMap]) {
       const kept = names.filter((n) => !removed.has(n));
-      if (kept.length !== names.length) this.childrenMap.set(parent, kept);
+      if (removed.has(parent) && kept.length === 0) this.childrenMap.delete(parent);
+      else if (kept.length !== names.length) this.childrenMap.set(parent, kept);
     }
     const top = this.topLevel.get(file.libraryId);
     if (top) this.topLevel.set(file.libraryId, top.filter((n) => !file.classNames.includes(n)));
@@ -293,17 +296,23 @@ export class ClassRegistry {
     return this.lookupInClass(name, scopeClass, true);
   }
 
-  private resolveDotted(dotted: string): RegisteredClass | undefined {
+  /**
+   * Resolves a fully-qualified name. `visiting` (see `findNested`) is threaded through so that
+   * an extends/import clause whose resolution leads back into a class being searched terminates.
+   */
+  private resolveDotted(dotted: string, visiting: Set<string> = new Set()): RegisteredClass | undefined {
     const direct = this.get(dotted);
     if (direct) return direct;
     // The dotted name may traverse inherited nested classes: resolve part by part.
     const parts = dotted.split('.');
     let cur = this.get(parts[0]);
-    for (let i = 1; cur && i < parts.length; i++) cur = this.findNested(cur, parts[i], new Set());
+    for (let i = 1; cur && i < parts.length; i++) cur = this.findNested(cur, parts[i], visiting);
     return cur;
   }
 
-  private lookupInClass(name: string, scopeClass: RegisteredClass | undefined, includeInherited: boolean): RegisteredClass | undefined {
+  private lookupInClass(name: string, scopeClass: RegisteredClass | undefined, includeInherited: boolean, visiting: Set<string> = new Set()): RegisteredClass | undefined {
+    // A leading '.' selects the global scope (Modelica §5.3.3).
+    if (name.startsWith('.')) return this.resolveDotted(name.slice(1), visiting);
     const parts = name.split('.');
     const first = parts[0];
     let found: RegisteredClass | undefined;
@@ -311,15 +320,15 @@ export class ClassRegistry {
     let inherit = includeInherited;
     // Walk enclosing scopes.
     while (cur) {
-      found = inherit ? this.findNested(cur, first, new Set()) : this.findOwnNested(cur, first);
-      if (!found) found = this.findImport(cur, first);
+      found = inherit ? this.findNested(cur, first, visiting) : this.findOwnNested(cur, first);
+      if (!found) found = this.findImport(cur, first, visiting);
       if (found) break;
       cur = cur.parentName ? this.get(cur.parentName) : undefined;
       inherit = true;
     }
     if (!found) found = this.get(first);
     if (!found) return undefined;
-    for (let i = 1; found && i < parts.length; i++) found = this.findNested(found, parts[i], new Set());
+    for (let i = 1; found && i < parts.length; i++) found = this.findNested(found, parts[i], visiting);
     return found;
   }
 
@@ -330,44 +339,55 @@ export class ClassRegistry {
     return undefined;
   }
 
-  /** Nested class `name` of `cls`, searching inherited classes too. */
+  /**
+   * Nested class `name` of `cls`, searching inherited classes too. `visiting` holds the
+   * `class::name` searches currently in progress: resolving the base classes and imports of
+   * `cls` may lead back to a class under search (e.g. `model M extends M.X;` or an MSL-style
+   * `extends MyLib.Icons.Package` before `Icons` exists), which would otherwise recurse forever.
+   * Such a re-entrant search is unresolvable and yields undefined.
+   */
   private findNested(cls: RegisteredClass, name: string, visiting: Set<string>): RegisteredClass | undefined {
-    if (visiting.has(cls.fullName)) return undefined;
-    visiting.add(cls.fullName);
-    const own = this.findOwnNested(cls, name);
-    if (own) return own;
-    for (const ext of cls.def.extends) {
-      const base = this.lookupInClass(ext.typeName, cls, false);
-      if (!base || base.fullName === cls.fullName) continue;
-      const r = this.findNested(base, name, visiting);
-      if (r) return r;
+    const key = `${cls.fullName}::${name}`;
+    if (visiting.has(key)) return undefined;
+    visiting.add(key);
+    try {
+      const own = this.findOwnNested(cls, name);
+      if (own) return own;
+      for (const ext of cls.def.extends) {
+        const base = this.lookupInClass(ext.typeName, cls, false, visiting);
+        if (!base || base.fullName === cls.fullName) continue;
+        const r = this.findNested(base, name, visiting);
+        if (r) return r;
+      }
+      // Short class definitions inherit nested classes of their target (rare; e.g. `package X = Y`).
+      if (cls.def.shortClass) {
+        const target = this.lookupInClass(cls.def.shortClass.typeName, cls.parentName ? this.get(cls.parentName) : undefined, true, visiting);
+        if (target && target.fullName !== cls.fullName) return this.findNested(target, name, visiting);
+      }
+      return undefined;
+    } finally {
+      visiting.delete(key);
     }
-    // Short class definitions inherit nested classes of their target (rare; e.g. `package X = Y`).
-    if (cls.def.shortClass) {
-      const target = this.lookupInClass(cls.def.shortClass.typeName, cls.parentName ? this.get(cls.parentName) : undefined, true);
-      if (target && target.fullName !== cls.fullName) return this.findNested(target, name, visiting);
-    }
-    return undefined;
   }
 
-  private findImport(cls: RegisteredClass, name: string): RegisteredClass | undefined {
+  private findImport(cls: RegisteredClass, name: string, visiting: Set<string>): RegisteredClass | undefined {
     if (cls.builtin) return undefined;
     for (const imp of cls.def.imports) {
       if (imp.alias) {
-        if (imp.alias === name) return this.resolveDotted(imp.path);
+        if (imp.alias === name) return this.resolveDotted(imp.path, visiting);
         continue;
       }
       if (imp.names) {
-        if (imp.names.includes(name)) return this.resolveDotted(`${imp.path}.${name}`);
+        if (imp.names.includes(name)) return this.resolveDotted(`${imp.path}.${name}`, visiting);
         continue;
       }
       if (imp.wildcard) {
-        const r = this.resolveDotted(`${imp.path}.${name}`);
+        const r = this.resolveDotted(`${imp.path}.${name}`, visiting);
         if (r) return r;
         continue;
       }
       const last = imp.path.split('.').pop();
-      if (last === name) return this.resolveDotted(imp.path);
+      if (last === name) return this.resolveDotted(imp.path, visiting);
     }
     return undefined;
   }

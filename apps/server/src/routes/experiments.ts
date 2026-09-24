@@ -17,10 +17,10 @@ import type { SimulationResult } from '@impact/core';
 import type { CaseDto, CaseLogResponse, CaseResultMetaResponse, CreateExperimentRequest, ExperimentAnalysis, ExperimentBase, ExperimentDefinition, ExperimentDto, ExperimentExtension, ExperimentVariablesResponse, ItemsResponse, TrajectoriesRequest, TrajectoriesResponse } from '@impact/protocol';
 import { expandCases, type ModifierValue } from '../cases.js';
 import type { AppContext } from '../context.js';
-import { badRequest, notFound } from '../errors.js';
+import { badRequest, conflict, notFound } from '../errors.js';
 import { caseId, newExperimentId } from '../ids.js';
 import { parseModelSpec } from './model-executables.js';
-import { optionalObject, optionalString, queryString, requireObject, requireString, requireStringArray } from '../validate.js';
+import { optionalObject, optionalString, queryString, requireObject, requireString, requireStringArray, validateIdParams } from '../validate.js';
 
 // ---------------------------------------------------------------------------------------
 // Request validation
@@ -135,8 +135,23 @@ function resultToCsv(result: SimulationResult): string {
   return `${lines.join('\n')}\n`;
 }
 
+/**
+ * The result of a case that finished successfully. A case that has not run (yet) is a 409, a
+ * failed/cancelled one a 404 — never data from an earlier run (outputs are cleared on re-run).
+ */
+function requireCaseResult(ctx: AppContext, wid: string, eid: string, cid: string): SimulationResult {
+  const c = ctx.storage.requireCase(wid, eid, cid);
+  const status = c.run_info.status;
+  if (status === 'not_started' || status === 'started') throw conflict(`Case '${cid}' has no result yet (status ${status})`, { status });
+  if (status !== 'successful') throw notFound(`Case '${cid}' has no result (status ${status})`, { status });
+  const result = ctx.storage.readCaseResult(wid, eid, cid);
+  if (!result) throw notFound(`Case '${cid}' has no result`);
+  return result;
+}
+
 export function experimentRoutes(ctx: AppContext): Router {
   const router = Router();
+  validateIdParams(router);
 
   // -- experiments -------------------------------------------------------------------------
 
@@ -277,10 +292,10 @@ export function experimentRoutes(ctx: AppContext): Router {
   router.post('/:wid/experiments/:eid/cases/:cid/trajectories', (req, res) => {
     const { wid, eid, cid } = req.params;
     ctx.storage.requireExperiment(wid, eid);
-    ctx.storage.requireCase(wid, eid, cid);
+    const c = ctx.storage.requireCase(wid, eid, cid);
     const body = requireObject(req.body, 'body') as Partial<TrajectoriesRequest>;
     const names = requireStringArray(body.variable_names, 'variable_names');
-    const result = ctx.storage.readCaseResult(wid, eid, cid);
+    const result = c.run_info.status === 'successful' ? ctx.storage.readCaseResult(wid, eid, cid) : undefined;
     res.json(names.map((name) => trajectoryValues(result, name)));
   });
 
@@ -295,9 +310,7 @@ export function experimentRoutes(ctx: AppContext): Router {
   router.get('/:wid/experiments/:eid/cases/:cid/result', (req, res) => {
     const { wid, eid, cid } = req.params;
     const experiment = ctx.storage.requireExperiment(wid, eid);
-    ctx.storage.requireCase(wid, eid, cid);
-    const result = ctx.storage.readCaseResult(wid, eid, cid);
-    if (!result) throw notFound(`Case '${cid}' has no result`);
+    const result = requireCaseResult(ctx, wid, eid, cid);
     if (queryString(req.query.format) === 'json') {
       res.json(result);
       return;
@@ -311,9 +324,7 @@ export function experimentRoutes(ctx: AppContext): Router {
   router.get('/:wid/experiments/:eid/cases/:cid/result/meta', (req, res) => {
     const { wid, eid, cid } = req.params;
     const experiment = ctx.storage.requireExperiment(wid, eid);
-    ctx.storage.requireCase(wid, eid, cid);
-    const result = ctx.storage.readCaseResult(wid, eid, cid);
-    if (!result) throw notFound(`Case '${cid}' has no result`);
+    const result = requireCaseResult(ctx, wid, eid, cid);
     const body: CaseResultMetaResponse = {
       className: result.className || experiment.className,
       time: { start: result.time[0] ?? 0, stop: result.time[result.time.length - 1] ?? 0, points: result.time.length },

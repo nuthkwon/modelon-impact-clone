@@ -375,39 +375,156 @@ function renameComponent(ctx: EditContext, op: Extract<EditOperation, { op: 'ren
   if (takenNames(ctx.registry, ctx.className, ctx.target).has(op.newName)) {
     throw new EditError(`Name '${op.newName}' is already used in '${ctx.className}'`);
   }
+  // The component is inherited by every derived class: the new name must be free there too.
+  const derived = derivedClasses(ctx);
+  const clashes = derived.filter((d) => takenNames(ctx.registry, d.cls.fullName, d.own).has(op.newName)).map((d) => d.cls.fullName);
+  if (clashes.length) {
+    throw new EditError(`Name '${op.newName}' is already used in the derived class${clashes.length > 1 ? 'es' : ''} ${quoteList(clashes)}`);
+  }
+  const names = new Set([op.name]);
+  const toUpdate = referencingDerived(ctx, derived, names, 'renamed');
+
   comp.name = op.newName;
   renameReferences(ctx.target, op.name, op.newName);
-  const mention = new RegExp(`(^|[^A-Za-z0-9_])${op.name}(?![A-Za-z0-9_])`);
-  if ((ctx.target.algorithms ?? []).some((a) => mention.test(a.text))) {
-    ctx.diagnostics.push({
-      severity: 'warning',
-      message: `Algorithm sections mention '${op.name}' and were not updated; rename those references by hand`,
-      path: `${ctx.className}.${op.newName}`,
-    });
+  for (const { cls, own } of toUpdate) {
+    renameReferences(own, op.name, op.newName);
+    for (const ext of extendsTowardsTarget(ctx, cls, own)) {
+      for (const m of ext.modification?.mods ?? []) if (modifierHead(m.name) === op.name) m.name = op.newName + m.name.slice(op.name.length);
+    }
+  }
+
+  const algorithms = ctx.target.algorithms ?? [];
+  if (algorithms.length) {
+    const mention = new RegExp(`(^|[^A-Za-z0-9_])${escapeRegExp(op.name)}(?![A-Za-z0-9_])`);
+    if (algorithms.some((a) => mention.test(a.text))) {
+      ctx.diagnostics.push({
+        severity: 'warning',
+        message: `Algorithm sections mention '${op.name}' and were not updated; rename those references by hand`,
+        path: `${ctx.className}.${op.newName}`,
+      });
+    }
   }
 }
 
 function deleteComponents(ctx: EditContext, op: Extract<EditOperation, { op: 'deleteComponents' }>): void {
   const names = new Set(op.names);
   for (const name of names) requireOwnComponent(ctx, name, 'deleted');
+  const toUpdate = referencingDerived(ctx, derivedClasses(ctx), names, 'deleted');
   const { target } = ctx;
   target.components = target.components.filter((c) => !names.has(c.name));
   target.equations = removeConnectsReferencing(target.equations, names);
   target.initialEquations = removeConnectsReferencing(target.initialEquations, names);
+  const leftovers = leftoverReferences(target, names);
 
-  const leftovers: string[] = [];
-  for (const eq of target.equations) if (equationReferences(eq, names)) leftovers.push(describeEquation(eq));
-  for (const eq of target.initialEquations) if (equationReferences(eq, names)) leftovers.push(`initial equation ${describeEquation(eq)}`);
-  for (const c of target.components) if (componentReferences(c, names)) leftovers.push(`declaration of '${c.name}'`);
-  for (const ext of target.extends) if (modificationReferences(ext.modification, names)) leftovers.push(`extends ${ext.typeName}`);
+  // Derived classes in the same file lose their connects to, and `extends` modifiers of, the deleted components.
+  for (const { cls, own } of toUpdate) {
+    own.equations = removeConnectsReferencing(own.equations, names);
+    own.initialEquations = removeConnectsReferencing(own.initialEquations, names);
+    for (const ext of extendsTowardsTarget(ctx, cls, own)) {
+      if (!ext.modification) continue;
+      ext.modification.mods = ext.modification.mods.filter((m) => !names.has(modifierHead(m.name)));
+      if (isEmptyModification(ext.modification)) delete ext.modification;
+    }
+    leftovers.push(...leftoverReferences(own, names).map((where) => `${cls.fullName}: ${where}`));
+  }
+
   if (leftovers.length) {
-    const list = [...names].map((n) => `'${n}'`).join(', ');
     ctx.diagnostics.push({
       severity: 'warning',
-      message: `Deleted component${names.size > 1 ? 's' : ''} ${list} still referenced by: ${leftovers.join('; ')}`,
+      message: `Deleted component${names.size > 1 ? 's' : ''} ${quoteList([...names])} still referenced by: ${leftovers.join('; ')}`,
       path: ctx.className,
     });
   }
+}
+
+/** Places in `def` that still refer to one of `names` (connect equations are expected to be removed already). */
+function leftoverReferences(def: ClassDef, names: Set<string>): string[] {
+  const out: string[] = [];
+  for (const eq of def.equations) if (equationReferences(eq, names)) out.push(describeEquation(eq));
+  for (const eq of def.initialEquations) if (equationReferences(eq, names)) out.push(`initial equation ${describeEquation(eq)}`);
+  for (const c of def.components) if (componentReferences(c, names)) out.push(`declaration of '${c.name}'`);
+  for (const ext of def.extends) if (modificationReferences(ext.modification, names)) out.push(`extends ${ext.typeName}`);
+  return out;
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+const quoteList = (names: string[]): string => names.map((n) => `'${n}'`).join(', ');
+
+// -------------------------------------------------------------------------------------------------
+// Derived classes (they inherit the edited class's components)
+// -------------------------------------------------------------------------------------------------
+
+interface DerivedClass {
+  cls: RegisteredClass;
+  /** The class's definition inside the edited copy of the file, when it is declared in the same file. */
+  own?: ClassDef;
+}
+
+/** Every registered class that extends `ctx.className`, directly or through other classes. */
+function derivedClasses(ctx: EditContext): DerivedClass[] {
+  const { registry, className } = ctx;
+  const edited = registry.get(className);
+  const out: DerivedClass[] = [];
+  for (const name of registry.allClassNames()) {
+    if (name === className) continue;
+    const cls = registry.get(name);
+    if (!cls || cls.builtin || cls.def.extends.length === 0) continue;
+    if (!registry.inheritanceChain(name).some((c) => c.fullName === className)) continue;
+    const sameFile = !!edited && cls.libraryId === edited.libraryId && cls.file === edited.file;
+    const own = sameFile ? findClassDef(ctx.def, name) : undefined;
+    out.push(own ? { cls, own } : { cls });
+  }
+  return out;
+}
+
+/** Head of a (possibly dotted) modifier name: `resistor` for `resistor.R`. */
+function modifierHead(name: string): string {
+  const dot = name.indexOf('.');
+  return dot < 0 ? name : name.slice(0, dot);
+}
+
+/** The `extends` clauses of `def` (a class derived from the edited one) through which the edited class is inherited. */
+function extendsTowardsTarget(ctx: EditContext, derived: RegisteredClass, def: ClassDef): ExtendsClause[] {
+  return def.extends.filter((ext) => {
+    const base = ctx.registry.lookup(ext.typeName, derived.fullName);
+    return !!base && (base.fullName === ctx.className || ctx.registry.inheritanceChain(base.fullName).some((c) => c.fullName === ctx.className));
+  });
+}
+
+/** True when `def` mentions one of the inherited components `names`: in equations, declarations or as `extends` modifier of the edited class. */
+function derivedReferences(ctx: EditContext, derived: RegisteredClass, def: ClassDef, names: Set<string>): boolean {
+  if (def.equations.some((eq) => equationReferences(eq, names))) return true;
+  if (def.initialEquations.some((eq) => equationReferences(eq, names))) return true;
+  if (def.components.some((c) => componentReferences(c, names))) return true;
+  if (def.extends.some((ext) => modificationReferences(ext.modification, names))) return true;
+  return extendsTowardsTarget(ctx, derived, def).some((ext) => (ext.modification?.mods ?? []).some((m) => names.has(modifierHead(m.name))));
+}
+
+/**
+ * The derived classes that refer to the components `names`. Those declared in the edited file are
+ * returned so the edit can update them; a reference from a class in another file cannot be fixed
+ * by this edit and makes it fail, instead of silently breaking that class.
+ */
+function referencingDerived(ctx: EditContext, derived: DerivedClass[], names: Set<string>, verb: string): { cls: RegisteredClass; own: ClassDef }[] {
+  const sameFile: { cls: RegisteredClass; own: ClassDef }[] = [];
+  const elsewhere: string[] = [];
+  for (const { cls, own } of derived) {
+    if (!derivedReferences(ctx, cls, own ?? cls.def, names)) continue;
+    if (own) sameFile.push({ cls, own });
+    else elsewhere.push(cls.fullName);
+  }
+  if (elsewhere.length) {
+    const plural = names.size > 1;
+    throw new EditError(
+      `Component${plural ? 's' : ''} ${quoteList([...names])} ${plural ? 'are' : 'is'} referred to by the derived class${elsewhere.length > 1 ? 'es' : ''} ` +
+        `${quoteList(elsewhere)} in other files and cannot be ${verb}; update those references first`,
+      ctx.className,
+    );
+  }
+  return sameFile;
 }
 
 // -------------------------------------------------------------------------------------------------

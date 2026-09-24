@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { E, ModelicaError, type ClassDef, type Equation, type Expr } from '../ast.js';
 import { parse, parseExpression, parseModification } from './parser.js';
+import { printExpr } from './printer.js';
 
 /** Removes `loc`/`nameLoc` recursively so ASTs can be compared structurally. */
 function stripLoc<T>(value: T): T {
@@ -575,6 +576,16 @@ describe('expressions', () => {
     expect(() => parseExpression('{x for x in 1:3}')).toThrow(/Array comprehensions .* are not supported/);
     expect(() => parseExpression('sum(x[i] for i in 1:3)')).toThrow(/Iterators in function calls .* are not supported/);
     expect(() => parseExpression('()')).toThrow(/Expected expression inside parentheses/);
+  });
+
+  it('rejects function calls through subscripted component references instead of dropping the subscripts', () => {
+    // finding: `a[1].f(x)` used to parse as call 'a.f' and re-print as `a.f(x)`.
+    expect(() => parseExpression('a[1].f(x)')).toThrow(/Function calls through subscripted component references \(a\[\.\.\.\]\.f\(\.\.\.\)\) are not supported/);
+    expect(() => parse('model M\n  Real y;\nequation\n  y = medium[1].density(state);\nend M;')).toThrow(/subscripted component references .*\(line 4, column 7\)/);
+    // Dotted callees and subscripted references without a call still parse and round-trip.
+    expect(parseExpression('a.f(x)')).toMatchObject({ kind: 'call', callee: 'a.f' });
+    expect(printExpr(parseExpression('a[1].b'))).toBe('a[1].b');
+    expect(printExpr(parseExpression('f(a[1].b)'))).toBe('f(a[1].b)');
   });
 });
 

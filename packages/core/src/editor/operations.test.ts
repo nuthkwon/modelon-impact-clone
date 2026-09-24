@@ -772,3 +772,146 @@ describe('round trips', () => {
     expect(stripLoc(parse(renamed.text))).toEqual(stripLoc(parse(EXAMPLES)));
   });
 });
+
+// -------------------------------------------------------------------------------------------------
+// Renaming / deleting: identifiers, loop indices and derived classes
+// -------------------------------------------------------------------------------------------------
+
+describe('renameComponent with unusual names and scopes', () => {
+  it('renames a quoted identifier containing regex metacharacters', () => {
+    const reg = makeRegistry();
+    expect(reg.addFile('Examples', 'Examples/Q.mo', `within Examples;
+model Q
+  Real 'a(b' = 1;
+  Real y;
+equation
+  y = 'a(b';
+end Q;
+`)).toEqual([]);
+    const result = applyEdit(reg, 'Examples.Q', { op: 'renameComponent', name: "'a(b'", newName: 'ab' });
+    expect(result.diagnostics).toEqual([]);
+    const cls = findClassDef(parse(result.text, 'Examples/Q.mo'), 'Examples.Q')!;
+    expect(cls.components.map((c) => c.name)).toEqual(['ab', 'y']);
+    expect(cls.equations[0].kind === 'equals' && printExpr(cls.equations[0].right)).toBe('ab');
+  });
+
+  it('still warns about algorithm sections mentioning a quoted identifier', () => {
+    const reg = makeRegistry();
+    expect(reg.addFile('Examples', 'Examples/Q.mo', `within Examples;
+model Q
+  Real 'a(b' = 1;
+  Real y;
+algorithm
+  y := 'a(b';
+end Q;
+`)).toEqual([]);
+    const result = applyEdit(reg, 'Examples.Q', { op: 'renameComponent', name: "'a(b'", newName: 'ab' });
+    expect(result.diagnostics).toEqual([expect.objectContaining({ severity: 'warning', message: expect.stringMatching(/Algorithm sections mention/) })]);
+    expect(result.text).toContain('Real ab = 1;');
+  });
+
+  const FOR = `within Examples;
+model F
+  Real i = 1;
+  Real x[3];
+  Real y;
+equation
+  for i in 1:3 loop
+    x[i] = i*y;
+  end for;
+  y = i;
+end F;
+`;
+
+  it('leaves for-loop indices that shadow the component alone', () => {
+    const reg = makeRegistry();
+    expect(reg.addFile('Examples', 'Examples/F.mo', FOR)).toEqual([]);
+    const result = applyEdit(reg, 'Examples.F', { op: 'renameComponent', name: 'i', newName: 'cur' });
+    expect(result.diagnostics).toEqual([]);
+    const cls = findClassDef(parse(result.text, 'Examples/F.mo'), 'Examples.F')!;
+    expect(cls.components.map((c) => c.name)).toEqual(['cur', 'x', 'y']);
+    const loop = cls.equations[0];
+    expect(loop.kind).toBe('for');
+    if (loop.kind !== 'for') return;
+    expect(loop.indices.map((ix) => ix.name)).toEqual(['i']);
+    const body = loop.equations[0];
+    expect(body.kind === 'equals' && `${printExpr(body.left)} = ${printExpr(body.right)}`).toBe('x[i] = i*y');
+    const last = cls.equations[1];
+    expect(last.kind === 'equals' && printExpr(last.right)).toBe('cur');
+  });
+
+  it('does not report shadowed loop indices as leftover references of a deleted component', () => {
+    const reg = makeRegistry();
+    expect(reg.addFile('Examples', 'Examples/F.mo', FOR)).toEqual([]);
+    const result = applyEdit(reg, 'Examples.F', { op: 'deleteComponents', names: ['i'] });
+    expect(result.diagnostics).toHaveLength(1);
+    expect(result.diagnostics[0].message).toContain('y = i');
+    expect(result.diagnostics[0].message).not.toContain('loop');
+  });
+});
+
+describe('editing a component that derived classes refer to', () => {
+  const derivedOf = (text: string): ClassDef => {
+    const cls = findClassDef(parse(text, EXAMPLES_PATH), DERIVED);
+    expect(cls).toBeDefined();
+    return cls!;
+  };
+
+  it('renaming updates connect equations of derived classes in the same file', () => {
+    const { result, text } = apply({ op: 'renameComponent', name: 'resistor1', newName: 'r2' });
+    expect(result.diagnostics).toEqual([]);
+    expect(derivedOf(text).equations.map(connectText)).toEqual(['connect(r2.n, load.p)']);
+  });
+
+  it('renaming updates the extends modifiers of derived classes in the same file', () => {
+    const { result, text } = apply({ op: 'renameComponent', name: 'R', newName: 'Rtot' });
+    expect(result.diagnostics).toEqual([]);
+    const derived = derivedOf(text);
+    expect(modNames(derived.extends[0].modification?.mods)).toEqual(['Rtot']);
+    expect(text).toContain('extends Circuit(Rtot=50)');
+  });
+
+  it('deleting removes connect equations and extends modifiers of derived classes in the same file', () => {
+    const { result, text } = apply({ op: 'deleteComponents', names: ['resistor1'] });
+    expect(result.diagnostics).toEqual([]);
+    expect(derivedOf(text).equations).toEqual([]);
+
+    const dropped = apply({ op: 'deleteComponents', names: ['R'] });
+    const derived = derivedOf(dropped.text);
+    expect(derived.extends[0].modification?.mods ?? []).toEqual([]);
+    expect(dropped.text).toContain('extends Circuit;');
+    // Circuit's own `resistor(R=R)` is still reported, as before.
+    expect(dropped.result.diagnostics.map((d) => d.message).join('\n')).toContain("declaration of 'resistor'");
+  });
+
+  it('refuses a new name that a derived class already declares', () => {
+    applyError({ op: 'renameComponent', name: 'resistor', newName: 'load' }, /Examples\.Electrical\.Derived/);
+  });
+
+  it('refuses renaming or deleting when a derived class in another file refers to the component', () => {
+    const reg = makeRegistry();
+    expect(reg.addFile('Examples', 'Examples/Remote.mo', `within Examples;
+model Remote "Derived in another file"
+  extends Electrical.Circuit(R=1);
+equation
+  connect(resistor1.n, u);
+end Remote;
+`)).toEqual([]);
+    const original = reg.fileOf(CIRCUIT)!.text;
+    for (const op of [
+      { op: 'renameComponent', name: 'R', newName: 'Rtot' },
+      { op: 'renameComponent', name: 'resistor1', newName: 'r2' },
+      { op: 'deleteComponents', names: ['resistor1'] },
+    ] as EditOperation[]) {
+      const result = applyEdit(reg, CIRCUIT, op);
+      expect(result.text).toBe(original);
+      const errors = result.diagnostics.filter((d) => d.severity === 'error');
+      expect(errors).toHaveLength(1);
+      expect(errors[0].message).toMatch(/Examples\.Remote/);
+    }
+    // Derived classes that do not mention the component do not block the edit.
+    const ok = applyEdit(reg, CIRCUIT, { op: 'renameComponent', name: 'capacitor', newName: 'cap' });
+    expect(ok.diagnostics).toEqual([]);
+    expect(ok.text).toContain('Capacitor cap(');
+  });
+});

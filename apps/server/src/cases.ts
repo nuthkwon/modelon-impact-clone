@@ -7,9 +7,19 @@
  * - Modifier values of the form `range(a, b, n)` (n evenly spaced values, Impact's parameter
  *   sweep) or `choices(v1, v2, …)` expand into several cases; several such modifiers form a
  *   cartesian product. Expanded cases are labelled `R=100` (`R=100, C=0.001`).
+ * - The total number of cases is capped (`MAX_CASES`, default 1000). The cap is checked
+ *   arithmetically before anything is materialised, so `range(0, 1, 1e9)` costs nothing.
  */
 import type { ExperimentAnalysis, ExperimentDefinition } from '@impact/protocol';
 import { badRequest } from './errors.js';
+
+export const DEFAULT_MAX_CASES = 1000;
+
+/** Maximum number of cases one experiment may expand to (`MAX_CASES` env, default 1000). */
+export function maxCases(): number {
+  const n = Number(process.env.MAX_CASES);
+  return Number.isInteger(n) && n > 0 ? n : DEFAULT_MAX_CASES;
+}
 
 export type ModifierValue = number | string | boolean;
 
@@ -65,7 +75,7 @@ function parseLiteral(text: string): ModifierValue {
 }
 
 /** Values of a sweep modifier, or undefined when `value` is a plain modifier. */
-export function parseSweep(value: ModifierValue): ModifierValue[] | undefined {
+export function parseSweep(value: ModifierValue, limit = maxCases()): ModifierValue[] | undefined {
   if (typeof value !== 'string') return undefined;
   const range = RANGE_RE.exec(value);
   if (range) {
@@ -75,6 +85,7 @@ export function parseSweep(value: ModifierValue): ModifierValue[] | undefined {
     if (![a, b, n].every(Number.isFinite) || !Number.isInteger(n) || n < 1) {
       throw badRequest(`Invalid range() expression '${value}': expected range(start, end, count) with count >= 1`);
     }
+    if (n > limit) throw badRequest(`range() with count ${n} exceeds the maximum of ${limit} cases per experiment (MAX_CASES): '${value}'`);
     if (n === 1) return [a];
     const step = (b - a) / (n - 1);
     return Array.from({ length: n }, (_, i) => Number((a + i * step).toPrecision(12)));
@@ -83,6 +94,7 @@ export function parseSweep(value: ModifierValue): ModifierValue[] | undefined {
   if (choices) {
     const values = splitArgs(choices[1]).map(parseLiteral);
     if (!values.length) throw badRequest(`choices() needs at least one value: '${value}'`);
+    if (values.length > limit) throw badRequest(`choices() with ${values.length} values exceeds the maximum of ${limit} cases per experiment (MAX_CASES)`);
     return values;
   }
   return undefined;
@@ -116,7 +128,8 @@ function cartesian(sweeps: { name: string; values: ModifierValue[] }[]): [string
   return combos;
 }
 
-export function expandCases(def: ExperimentDefinition): CaseSpec[] {
+/** Throws 400 when `def` would expand to more than `limit` cases. */
+export function expandCases(def: ExperimentDefinition, limit = maxCases()): CaseSpec[] {
   const baseVars = def.base.modifiers?.variables ?? {};
   const templates: { label?: string; variables: Record<string, ModifierValue>; analysis: ExperimentAnalysis }[] = [];
   if (!def.extensions?.length) templates.push({ variables: { ...baseVars }, analysis: mergeAnalysis(def.base.analysis) });
@@ -128,16 +141,29 @@ export function expandCases(def: ExperimentDefinition): CaseSpec[] {
     });
   }
 
-  const out: CaseSpec[] = [];
-  let n = 0;
+  // Pass 1: parse the sweeps (each bounded by `limit`) and size the cartesian products
+  // arithmetically, so an oversized request is rejected before any case is materialised.
+  const parsed: { sweeps: { name: string; values: ModifierValue[] }[]; fixed: Record<string, ModifierValue> }[] = [];
+  let total = 0;
   for (const t of templates) {
     const sweeps: { name: string; values: ModifierValue[] }[] = [];
     const fixed: Record<string, ModifierValue> = {};
     for (const [name, value] of Object.entries(t.variables)) {
-      const values = parseSweep(value);
+      const values = parseSweep(value, limit);
       if (values) sweeps.push({ name, values });
       else fixed[name] = value;
     }
+    total += sweeps.reduce((product, s) => product * s.values.length, 1);
+    parsed.push({ sweeps, fixed });
+  }
+  if (total > limit) {
+    throw badRequest(`Experiment would expand to ${total} cases, more than the maximum of ${limit} (configurable with the MAX_CASES environment variable)`, { cases: total, maxCases: limit });
+  }
+
+  const out: CaseSpec[] = [];
+  let n = 0;
+  templates.forEach((t, ti) => {
+    const { sweeps, fixed } = parsed[ti];
     for (const combo of cartesian(sweeps)) {
       n++;
       const parametrization: Record<string, ModifierValue> = { ...fixed };
@@ -146,6 +172,6 @@ export function expandCases(def: ExperimentDefinition): CaseSpec[] {
       const label = t.label ? (sweepLabel ? `${t.label} ${sweepLabel}` : t.label) : sweepLabel || `Case ${n}`;
       out.push({ label, parametrization, analysis: t.analysis });
     }
-  }
+  });
   return out;
 }

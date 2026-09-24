@@ -1,19 +1,27 @@
 /**
  * In-process job runner for model compilation and experiment execution.
  *
- * Jobs run inside the server process. `flatten`/`simulate` are synchronous, so each unit of
- * work (one compilation, one case) is scheduled with `setImmediate`, which lets the event
- * loop serve requests between cases. Progress is reported through the solver's `onProgress`
- * hook, which also consumes the cancel flag set by `DELETE …/execution`.
+ * Compilation (`flatten` only) is quick and runs on the event loop, one unit per
+ * `setImmediate`. Experiment cases go through a `CaseRunner` (case-runner.ts): by default a
+ * `worker_threads` Worker per execution (sim-worker.ts), so the server keeps answering
+ * requests while a case simulates and `DELETE …/execution` interrupts the running case by
+ * terminating the thread. With `inlineSimulation` — implied when a fake `Engine` is injected —
+ * cases run on the main thread and cancel is cooperative through the solver's `onProgress`
+ * hook, i.e. it takes effect between solver steps / between cases.
+ *
+ * Job state lives in memory; the persisted `run_info` is the source of truth across restarts.
+ * `recoverInterrupted()` marks whatever a previous process left in `running`/`pending`.
  */
 import { performance } from 'node:perf_hooks';
-import type { Diagnostic, FlatModel, SimulationOptions, SimulationResult, SolverName } from '@impact/core';
-import { normalizeSolverName } from '@impact/core';
-import type { CaseDto, CaseStatus, ExecutionStatus, ExecutionStatusResponse, ExperimentAnalysis, ExperimentDto } from '@impact/protocol';
+import type { CaseDto, CaseStatus, ExecutionStatus, ExecutionStatusResponse, ExperimentDto, ModelExecutableDto } from '@impact/protocol';
+import { InlineCaseRunner, WorkerCaseRunner, serializeLibraries, type CaseRunner } from './case-runner.js';
 import type { Engine } from './engine.js';
 import { conflict, diagnosticsOf } from './errors.js';
 import type { RegistryCache } from './registry-cache.js';
+import { formatDiagnostic, type FlattenedInfo } from './sim-protocol.js';
 import type { Storage } from './storage.js';
+
+export { buildSimulationOptions, formatDiagnostic } from './sim-protocol.js';
 
 interface CompileJob {
   status: ExecutionStatus;
@@ -25,94 +33,125 @@ interface ExecutionJob {
   status: ExecutionStatus;
   progress: number;
   cancelled: boolean;
+  runner?: CaseRunner;
 }
 
-
-export function formatDiagnostic(d: Diagnostic): string {
-  let s = d.message;
-  if (d.path) s += ` (${d.path})`;
-  if (d.file && d.loc) s += ` [${d.file}:${d.loc.line}:${d.loc.column}]`;
-  else if (d.file) s += ` [${d.file}]`;
-  return s;
+export interface JobRunnerOptions {
+  /** Run cases on the main thread with the injected engine instead of in a worker thread. */
+  inlineSimulation?: boolean;
 }
+
+export const RESTART_MESSAGE = 'Execution was interrupted by a server restart';
+export const COMPILE_RESTART_MESSAGE = 'Compilation was interrupted by a server restart';
 
 const seconds = (t0: number) => ((performance.now() - t0) / 1000).toFixed(2);
 
-function num(v: unknown): number | undefined {
-  if (typeof v === 'number' && Number.isFinite(v)) return v;
-  if (typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v))) return Number(v);
-  return undefined;
-}
-
-/** Maps Impact analysis settings onto solver options; the model's `experiment` annotation supplies defaults. */
-export function buildSimulationOptions(analysis: ExperimentAnalysis, flat: FlatModel | undefined, modifiers: Record<string, number | string | boolean>): SimulationOptions {
-  const p = analysis.parameters ?? {};
-  const sim = analysis.simulationOptions ?? {};
-  const sol = analysis.solverOptions ?? {};
-  const startTime = num(p.start_time) ?? flat?.experiment?.StartTime ?? 0;
-  const finalTime = num(p.final_time) ?? flat?.experiment?.StopTime ?? 1;
-  const solverName: SolverName = (typeof sol.solver === 'string' ? normalizeSolverName(sol.solver) : undefined) ?? 'CVode';
-  const atol = num(sol.atol);
-  const stepSize = num(sol.step_size);
-  return {
-    startTime,
-    finalTime,
-    ncp: num(sim.ncp) ?? 500,
-    rtol: num(sol.rtol) ?? flat?.experiment?.Tolerance ?? 1e-6,
-    ...(atol !== undefined ? { atol } : {}),
-    solver: solverName,
-    ...(stepSize !== undefined ? { stepSize } : {}),
-    dynamicDiagnostics: sim.dynamic_diagnostics === true,
-    modifiers,
-  };
-}
-
-function statsLines(flat: FlatModel): string[] {
-  const s = flat.stats;
+function statsLines(s: FlattenedInfo['stats']): string[] {
   return [`Model statistics: ${s.unknowns} unknowns, ${s.equations} equations, ${s.states} states, ${s.parameters} parameters (${s.components} components, ${s.connections} connections)`];
-}
-
-/** Drops fields the result endpoints never read so `<cid>.result.json` stays small. */
-function compactResult(result: SimulationResult): SimulationResult {
-  return {
-    className: result.className,
-    options: result.options,
-    time: result.time,
-    trajectories: result.trajectories.map((t) => ({
-      name: t.name,
-      values: t.values,
-      kind: t.kind,
-      ...(t.unit ? { unit: t.unit } : {}),
-      ...(t.displayUnit ? { displayUnit: t.displayUnit } : {}),
-      ...(t.description ? { description: t.description } : {}),
-    })),
-    stats: result.stats,
-    log: [],
-  };
 }
 
 export class JobRunner {
   private compilations = new Map<string, CompileJob>();
   private executions = new Map<string, ExecutionJob>();
+  private readonly inline: boolean;
 
   constructor(
     private readonly storage: Storage,
     private readonly registries: RegistryCache,
     private readonly engine: Engine,
     private readonly log: (line: string) => void = () => {},
-  ) {}
+    options: JobRunnerOptions = {},
+  ) {
+    this.inline = options.inlineSimulation === true;
+  }
+
+  /** Whether cases run on the main thread (`true`) or in a worker thread. */
+  get inlineSimulation(): boolean {
+    return this.inline;
+  }
 
   forgetWorkspace(wid: string): void {
     for (const key of [...this.compilations.keys()]) if (key.startsWith(`${wid}/`)) this.compilations.delete(key);
-    for (const key of [...this.executions.keys()]) if (key.startsWith(`${wid}/`)) this.executions.delete(key);
+    for (const [key, job] of [...this.executions]) {
+      if (!key.startsWith(`${wid}/`)) continue;
+      job.cancelled = true;
+      job.runner?.cancel();
+      this.executions.delete(key);
+    }
   }
 
   forgetExperiment(wid: string, eid: string): void {
+    const job = this.executions.get(`${wid}/${eid}`);
+    if (job) {
+      job.cancelled = true;
+      job.runner?.cancel();
+    }
     this.executions.delete(`${wid}/${eid}`);
   }
 
   forgetExecutable(wid: string, fid: string): void {
     this.compilations.delete(`${wid}/${fid}`);
+  }
+
+  /** Terminates worker threads of running executions (server shutdown). */
+  shutdown(): void {
+    for (const job of this.executions.values()) {
+      job.cancelled = true;
+      job.runner?.cancel();
+    }
+  }
+
+  // ---------------------------------------------------------------------------------------
+  // Startup recovery
+  // ---------------------------------------------------------------------------------------
+
+  /**
+   * Marks jobs a previous server process left in progress: experiments in `running`/`pending`
+   * become `cancelled` (leftover cases too) and executables in `running` become `failed`,
+   * each with a note saying why. Returns the number of jobs touched.
+   */
+  recoverInterrupted(): number {
+    let n = 0;
+    for (const wid of this.storage.listWorkspaceIds()) {
+      for (const e of this.storage.listExperiments(wid)) {
+        if (e.run_info.status !== 'running' && e.run_info.status !== 'pending') continue;
+        this.abandonExecution(wid, e.id);
+        n++;
+      }
+      for (const x of this.storage.listExecutables(wid)) {
+        if (x.run_info.status !== 'running') continue;
+        this.abandonCompilation(wid, x);
+        n++;
+      }
+    }
+    if (n) this.log(`marked ${n} job(s) left over from a previous run as interrupted`);
+    return n;
+  }
+
+  private abandonExecution(wid: string, eid: string): void {
+    for (const c of this.storage.listCases(wid, eid)) {
+      if (c.run_info.status === 'not_started' || c.run_info.status === 'started') {
+        c.run_info.status = 'cancelled';
+        c.run_info.datetime_finished = new Date().toISOString();
+        c.run_info.failures = [RESTART_MESSAGE];
+        this.storage.saveCase(wid, eid, c);
+      }
+    }
+    this.updateRunInfo(wid, eid, 'cancelled', RESTART_MESSAGE);
+  }
+
+  private abandonCompilation(wid: string, executable: ModelExecutableDto): void {
+    executable.run_info = {
+      status: 'failed',
+      ...(executable.run_info.datetime_started ? { datetime_started: executable.run_info.datetime_started } : {}),
+      datetime_finished: new Date().toISOString(),
+      errors: [COMPILE_RESTART_MESSAGE],
+      warnings: [],
+    };
+    executable.statistics = undefined;
+    this.storage.saveExecutable(wid, executable);
+    const previous = this.storage.readExecutableLog(wid, executable.id);
+    this.storage.writeExecutableLog(wid, executable.id, `${previous}${previous && !previous.endsWith('\n') ? '\n' : ''}Error: ${COMPILE_RESTART_MESSAGE}\nCompilation failed\n`);
   }
 
   // ---------------------------------------------------------------------------------------
@@ -126,7 +165,8 @@ export class JobRunner {
     if (existing && (existing.status === 'pending' || existing.status === 'running')) throw conflict(`Compilation of '${fid}' is already running`);
     const job: CompileJob = { status: 'pending', progress: 0, lines: [] };
     this.compilations.set(key, job);
-    executable.run_info = { status: 'not_started' };
+    // `running` is persisted so a restart can tell an interrupted compilation from one that never started.
+    executable.run_info = { status: 'running', datetime_started: new Date().toISOString() };
     executable.statistics = undefined;
     this.storage.saveExecutable(wid, executable);
     setImmediate(() => this.runCompilation(wid, fid, job));
@@ -142,7 +182,7 @@ export class JobRunner {
     }
     const className = executable.input.className;
     const t0 = performance.now();
-    const started = new Date().toISOString();
+    const started = executable.run_info.datetime_started ?? new Date().toISOString();
     job.status = 'running';
     job.progress = 0.1;
     const lines = job.lines;
@@ -155,7 +195,7 @@ export class JobRunner {
       const wr = this.registries.get(wid);
       const flat = this.engine.flatten(wr.registry, className, { strict: true });
       job.progress = 0.8;
-      lines.push(...statsLines(flat));
+      lines.push(...statsLines(flat.stats));
       statistics = { ...flat.stats };
       for (const d of flat.diagnostics ?? []) {
         const text = formatDiagnostic(d);
@@ -195,9 +235,18 @@ export class JobRunner {
     const executable = this.storage.requireExecutable(wid, fid);
     const job = this.compilations.get(`${wid}/${fid}`);
     if (job) return { status: job.status, progress: job.progress, message: job.lines[job.lines.length - 1] ?? '' };
-    if (executable.run_info.status === 'not_started') return { status: 'pending', progress: 0 };
-    const logLines = this.storage.readExecutableLog(wid, fid).trimEnd().split('\n');
-    return { status: 'done', progress: 1, message: logLines[logLines.length - 1] ?? '' };
+    switch (executable.run_info.status) {
+      case 'not_started':
+        return { status: 'pending', progress: 0 };
+      case 'running':
+        // Persisted as running but no job in memory: a restart interrupted it.
+        this.abandonCompilation(wid, executable);
+        return { status: 'done', progress: 1, message: COMPILE_RESTART_MESSAGE };
+      default: {
+        const logLines = this.storage.readExecutableLog(wid, fid).trimEnd().split('\n');
+        return { status: 'done', progress: 1, message: logLines[logLines.length - 1] ?? '' };
+      }
+    }
   }
 
   compilationLog(wid: string, fid: string): string {
@@ -212,23 +261,36 @@ export class JobRunner {
   // ---------------------------------------------------------------------------------------
 
   startExecution(wid: string, eid: string): ExecutionStatusResponse {
-    const experiment = this.storage.requireExperiment(wid, eid);
+    this.storage.requireExperiment(wid, eid);
     const key = `${wid}/${eid}`;
     const existing = this.executions.get(key);
     if (existing && (existing.status === 'pending' || existing.status === 'running')) throw conflict(`Experiment '${eid}' is already running`);
     const job: ExecutionJob = { status: 'pending', progress: 0, cancelled: false };
     this.executions.set(key, job);
-    // Re-running resets every case.
+    // Re-running resets every case, including its previous result and log on disk.
     for (const c of this.storage.listCases(wid, eid)) {
       c.run_info = { status: 'not_started' };
       this.storage.saveCase(wid, eid, c);
+      this.storage.clearCaseOutputs(wid, eid, c.id);
     }
     this.updateRunInfo(wid, eid, 'pending');
-    setImmediate(() => this.runExecution(wid, eid, job));
+    setImmediate(() => {
+      this.runExecution(wid, eid, job).catch((e) => {
+        this.log(`execution ${eid} crashed: ${e instanceof Error ? e.stack ?? e.message : String(e)}`);
+        job.cancelled = true;
+        job.runner?.cancel();
+        this.finishExecution(wid, eid, job);
+      });
+    });
     return { status: 'pending', progress: 0 };
   }
 
-  private runExecution(wid: string, eid: string, job: ExecutionJob): void {
+  private createRunner(wid: string): CaseRunner {
+    if (this.inline) return new InlineCaseRunner(this.engine, () => this.registries.get(wid).registry);
+    return new WorkerCaseRunner(() => serializeLibraries(this.registries.get(wid)));
+  }
+
+  private async runExecution(wid: string, eid: string, job: ExecutionJob): Promise<void> {
     const experiment = this.storage.getExperiment(wid, eid);
     if (!experiment) {
       job.status = 'done';
@@ -240,78 +302,93 @@ export class JobRunner {
     job.status = 'running';
     this.updateRunInfo(wid, eid, 'running');
     this.log(`execution ${eid} (${experiment.className}): ${n} case(s)`);
-
-    const step = (i: number): void => {
-      if (i >= n || job.cancelled) {
-        this.finishExecution(wid, eid, job);
-        return;
-      }
-      setImmediate(() => {
+    const runner = this.createRunner(wid);
+    job.runner = runner;
+    try {
+      for (let i = 0; i < n && !job.cancelled; i++) {
+        // Yield a macrotask between cases so the inline runner also lets requests through.
+        await new Promise<void>((resolve) => setImmediate(resolve));
         if (!this.storage.getExperiment(wid, eid)) {
           // Deleted while running.
           job.status = 'cancelled';
           job.progress = 1;
           return;
         }
+        if (job.cancelled) break;
         try {
-          this.runCase(wid, eid, experiment.className, cases[i], i, n, job);
+          await this.runCase(wid, eid, experiment.className, cases[i], i, n, job, runner);
         } catch (e) {
           this.log(`case ${cases[i].id} crashed: ${e instanceof Error ? e.stack ?? e.message : String(e)}`);
         }
         job.progress = Math.min(1, (i + 1) / n);
         this.updateRunInfo(wid, eid, 'running');
-        step(i + 1);
-      });
-    };
-    step(0);
+      }
+    } finally {
+      runner.dispose();
+      job.runner = undefined;
+    }
+    this.finishExecution(wid, eid, job);
   }
 
-  private runCase(wid: string, eid: string, className: string, c: CaseDto, index: number, total: number, job: ExecutionJob): void {
+  private async runCase(wid: string, eid: string, className: string, c: CaseDto, index: number, total: number, job: ExecutionJob, runner: CaseRunner): Promise<void> {
     const t0 = performance.now();
     c.run_info = { status: 'started', datetime_started: new Date().toISOString() };
     this.storage.saveCase(wid, eid, c);
     const lines: string[] = [];
     let status: CaseStatus = 'successful';
     const modifiers = c.input.parametrization ?? {};
+    const seen = new Set<string>();
     try {
-      const wr = this.registries.get(wid);
-      const flat = this.engine.flatten(wr.registry, className, { modifiers, strict: true });
-      const options = buildSimulationOptions(c.input.analysis, flat, modifiers);
-      lines.push(`Simulating ${className} from t=${options.startTime} to t=${options.finalTime} with ${options.solver} (rtol=${options.rtol}${options.atol !== undefined ? `, atol=${options.atol}` : ''}, ncp=${options.ncp})`);
-      const modifierEntries = Object.entries(modifiers);
-      if (modifierEntries.length) lines.push(`Parameters: ${modifierEntries.map(([k, v]) => `${k}=${String(v)}`).join(', ')}`);
-      lines.push(...statsLines(flat));
-      for (const d of flat.diagnostics ?? []) lines.push(`${d.severity === 'error' ? 'Error' : d.severity === 'warning' ? 'Warning' : 'Info'}: ${formatDiagnostic(d)}`);
-      const seen = new Set<string>();
-      const result = this.engine.simulate(flat, options, {
-        onProgress: (progress) => {
-          job.progress = Math.min(1, (index + Math.max(0, Math.min(1, progress))) / total);
-          return !job.cancelled;
+      const outcome = await runner.run(
+        { className, modifiers, analysis: c.input.analysis },
+        {
+          onFlattened: ({ stats, diagnostics, options }) => {
+            lines.push(`Simulating ${className} from t=${options.startTime} to t=${options.finalTime} with ${options.solver} (rtol=${options.rtol}${options.atol !== undefined ? `, atol=${options.atol}` : ''}, ncp=${options.ncp})`);
+            const modifierEntries = Object.entries(modifiers);
+            if (modifierEntries.length) lines.push(`Parameters: ${modifierEntries.map(([k, v]) => `${k}=${String(v)}`).join(', ')}`);
+            lines.push(...statsLines(stats));
+            for (const d of diagnostics) lines.push(`${d.severity === 'error' ? 'Error' : d.severity === 'warning' ? 'Warning' : 'Info'}: ${formatDiagnostic(d)}`);
+          },
+          onProgress: (progress) => {
+            job.progress = Math.min(1, (index + Math.max(0, Math.min(1, progress))) / total);
+          },
+          onLog: (level, message) => {
+            const line = `[${level.toUpperCase()}] ${message}`;
+            seen.add(line);
+            lines.push(line);
+          },
         },
-        onLog: (level, message) => {
-          const line = `[${level.toUpperCase()}] ${message}`;
-          seen.add(line);
-          lines.push(line);
-        },
-      });
-      for (const m of result.log ?? []) {
-        const line = `[${m.level.toUpperCase()}] ${m.message}`;
-        if (!seen.has(line)) lines.push(line);
+      );
+      if (outcome.kind === 'cancelled') {
+        status = 'cancelled';
+        lines.push(`Simulation cancelled in ${seconds(t0)} s`);
+      } else if (outcome.kind === 'error') {
+        status = 'failed';
+        const failures = outcome.diagnostics.map(formatDiagnostic);
+        c.run_info.failures = failures;
+        for (const f of failures) lines.push(`Error: ${f}`);
+        lines.push(`Simulation failed in ${seconds(t0)} s`);
+      } else {
+        const { result } = outcome;
+        for (const m of result.log ?? []) {
+          const line = `[${m.level.toUpperCase()}] ${m.message}`;
+          if (!seen.has(line)) lines.push(line);
+        }
+        this.storage.writeCaseResult(wid, eid, c.id, { ...result, log: [] });
+        const s = result.stats;
+        lines.push(`Number of steps: ${s.steps}`);
+        lines.push(`Number of rejected steps: ${s.rejectedSteps}`);
+        lines.push(`Number of Newton iterations: ${s.newtonIterations}`);
+        lines.push(`Number of Jacobian evaluations: ${s.jacobianEvaluations}`);
+        lines.push(`Number of events: ${s.events}`);
+        lines.push(`Result: ${result.time.length} time points, ${result.trajectories.length} variables`);
+        c.run_info.statistics = Object.fromEntries(Object.entries(s).filter(([, v]) => typeof v === 'number' || typeof v === 'boolean')) as Record<string, number | boolean>;
+        if (s.aliasEliminated !== undefined || s.propagated !== undefined || s.dummyStates?.length) {
+          lines.push(`Structural analysis: ${s.aliasEliminated ?? 0} alias variables eliminated, ${s.propagated ?? 0} variables propagated, ${s.dummyStates?.length ?? 0} dummy derivatives selected${s.dummyStates?.length ? ` (${s.dummyStates.join(', ')})` : ''}`);
+        }
+        if (job.cancelled && !s.completed) status = 'cancelled';
+        lines.push(`Simulation ${status === 'successful' ? 'finished' : 'cancelled'} in ${seconds(t0)} s (solver ${s.cpuTimeMs.toFixed(0)} ms)`);
       }
-      this.storage.writeCaseResult(wid, eid, c.id, compactResult(result));
-      const s = result.stats;
-      lines.push(`Number of steps: ${s.steps}`);
-      lines.push(`Number of rejected steps: ${s.rejectedSteps}`);
-      lines.push(`Number of Newton iterations: ${s.newtonIterations}`);
-      lines.push(`Number of Jacobian evaluations: ${s.jacobianEvaluations}`);
-      lines.push(`Number of events: ${s.events}`);
-      lines.push(`Result: ${result.time.length} time points, ${result.trajectories.length} variables`);
-      c.run_info.statistics = Object.fromEntries(Object.entries(s).filter(([, v]) => typeof v === 'number' || typeof v === 'boolean')) as Record<string, number | boolean>;
-      if (s.aliasEliminated !== undefined || s.propagated !== undefined || s.dummyStates?.length) {
-        lines.push(`Structural analysis: ${s.aliasEliminated ?? 0} alias variables eliminated, ${s.propagated ?? 0} variables propagated, ${s.dummyStates?.length ?? 0} dummy derivatives selected${s.dummyStates?.length ? ` (${s.dummyStates.join(', ')})` : ''}`);
-      }
-      if (job.cancelled && !s.completed) status = 'cancelled';
-      lines.push(`Simulation ${status === 'successful' ? 'finished' : 'cancelled'} in ${seconds(t0)} s (solver ${s.cpuTimeMs.toFixed(0)} ms)`);
     } catch (e) {
       status = 'failed';
       const failures = diagnosticsOf(e).map(formatDiagnostic);
@@ -319,6 +396,7 @@ export class JobRunner {
       for (const f of failures) lines.push(`Error: ${f}`);
       lines.push(`Simulation failed in ${seconds(t0)} s`);
     }
+    if (!this.storage.getExperiment(wid, eid)) return; // deleted while the case ran
     c.run_info.status = status;
     c.run_info.datetime_finished = new Date().toISOString();
     this.storage.saveCase(wid, eid, c);
@@ -345,8 +423,8 @@ export class JobRunner {
     this.log(`execution ${eid}: ${job.status}`);
   }
 
-  /** Recomputes the experiment's case counters and persists its status. */
-  private updateRunInfo(wid: string, eid: string, status: ExperimentDto['run_info']['status']): void {
+  /** Recomputes the experiment's case counters and persists its status (and an optional note). */
+  private updateRunInfo(wid: string, eid: string, status: ExperimentDto['run_info']['status'], message?: string): void {
     const experiment = this.storage.getExperiment(wid, eid);
     if (!experiment) return;
     const cases = this.storage.listCases(wid, eid);
@@ -357,6 +435,7 @@ export class JobRunner {
       successful: count('successful'),
       cancelled: count('cancelled'),
       not_started: count('not_started') + count('started'),
+      ...(message !== undefined ? { message } : {}),
     };
     this.storage.saveExperiment(wid, experiment);
   }
@@ -369,30 +448,25 @@ export class JobRunner {
       case 'done':
         return { status: 'done', progress: 1 };
       case 'cancelled':
-        return { status: 'cancelled', progress: 1 };
+        return experiment.run_info.message ? { status: 'cancelled', progress: 1, message: experiment.run_info.message } : { status: 'cancelled', progress: 1 };
       case 'running':
       case 'pending': {
-        // No job in memory: the server restarted mid-run. Mark leftovers as cancelled.
-        for (const c of this.storage.listCases(wid, eid)) {
-          if (c.run_info.status === 'not_started' || c.run_info.status === 'started') {
-            c.run_info.status = 'cancelled';
-            this.storage.saveCase(wid, eid, c);
-          }
-        }
-        this.updateRunInfo(wid, eid, 'cancelled');
-        return { status: 'cancelled', progress: 1, message: 'Execution was interrupted by a server restart' };
+        // No job in memory: the server restarted mid-run (and recoverInterrupted did not see it).
+        this.abandonExecution(wid, eid);
+        return { status: 'cancelled', progress: 1, message: RESTART_MESSAGE };
       }
       default:
         return { status: 'pending', progress: 0 };
     }
   }
 
-  /** Sets the cancel flag; returns false when nothing is running. */
+  /** Cancels a running execution: sets the flag and interrupts the running case. Returns false when nothing is running. */
   cancelExecution(wid: string, eid: string): boolean {
     this.storage.requireExperiment(wid, eid);
     const job = this.executions.get(`${wid}/${eid}`);
     if (!job || (job.status !== 'pending' && job.status !== 'running')) return false;
     job.cancelled = true;
+    job.runner?.cancel();
     return true;
   }
 

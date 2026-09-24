@@ -59,35 +59,60 @@ export function forEachComponentRef(c: ComponentDecl, fn: RefVisitor): void {
   for (const d of c.arrayDims ?? []) forEachRef(d, fn);
 }
 
-/** Visits every ref of an equation (nested equations of if/for/when included; annotations excluded). */
-export function forEachEquationRef(eq: Equation, fn: RefVisitor): void {
+const NO_SHADOW: ReadonlySet<string> = new Set();
+
+/** True when the root of `ref` is a loop index in `shadowed` (and so does not denote a component). */
+function isShadowed(ref: RefExpr, shadowed: ReadonlySet<string>): boolean {
+  return shadowed.size > 0 && !ref.global && ref.parts.length > 0 && shadowed.has(ref.parts[0].name);
+}
+
+/** `forEachRef` skipping references whose root is a loop index in `shadowed` (their subscripts are still visited). */
+function forEachUnshadowedRef(e: Expr | undefined, fn: RefVisitor, shadowed: ReadonlySet<string>): void {
+  if (shadowed.size === 0) return forEachRef(e, fn);
+  forEachRef(e, (ref) => {
+    if (!isShadowed(ref, shadowed)) fn(ref);
+  });
+}
+
+/**
+ * Visits every ref of an equation (nested equations of if/for/when included; annotations excluded).
+ * Inside `for` loops the loop indices shadow components of the same name, so references to them are
+ * not reported; `shadowed` carries the indices of enclosing loops.
+ */
+export function forEachEquationRef(eq: Equation, fn: RefVisitor, shadowed: ReadonlySet<string> = NO_SHADOW): void {
   switch (eq.kind) {
     case 'equals':
-      forEachRef(eq.left, fn);
-      forEachRef(eq.right, fn);
+      forEachUnshadowedRef(eq.left, fn, shadowed);
+      forEachUnshadowedRef(eq.right, fn, shadowed);
       return;
     case 'connect':
-      forEachRef(eq.a, fn);
-      forEachRef(eq.b, fn);
+      forEachUnshadowedRef(eq.a, fn, shadowed);
+      forEachUnshadowedRef(eq.b, fn, shadowed);
       return;
     case 'call':
-      forEachRef(eq.call, fn);
+      forEachUnshadowedRef(eq.call, fn, shadowed);
       return;
     case 'if':
       for (const b of eq.branches) {
-        forEachRef(b.cond, fn);
-        for (const q of b.equations) forEachEquationRef(q, fn);
+        forEachUnshadowedRef(b.cond, fn, shadowed);
+        for (const q of b.equations) forEachEquationRef(q, fn, shadowed);
       }
-      for (const q of eq.else) forEachEquationRef(q, fn);
+      for (const q of eq.else) forEachEquationRef(q, fn, shadowed);
       return;
-    case 'for':
-      for (const i of eq.indices) forEachRef(i.range, fn);
-      for (const q of eq.equations) forEachEquationRef(q, fn);
+    case 'for': {
+      // Each range is evaluated in the enclosing scope extended by the indices declared before it.
+      let inner = shadowed;
+      for (const i of eq.indices) {
+        forEachUnshadowedRef(i.range, fn, inner);
+        inner = new Set([...inner, i.name]);
+      }
+      for (const q of eq.equations) forEachEquationRef(q, fn, inner);
       return;
+    }
     case 'when':
       for (const b of eq.branches) {
-        forEachRef(b.cond, fn);
-        for (const q of b.equations) forEachEquationRef(q, fn);
+        forEachUnshadowedRef(b.cond, fn, shadowed);
+        for (const q of b.equations) forEachEquationRef(q, fn, shadowed);
       }
       return;
   }
@@ -123,7 +148,8 @@ export function modificationReferences(mod: Modification | undefined, names: Set
 /**
  * Renames the root of every reference to component `oldName` in the class body: equations,
  * initial equations, component modifiers/conditions/dimensions and `extends` modifiers.
- * The class annotation is left alone (icons use `%name`, not component names).
+ * Loop indices named `oldName` and their uses are left alone, as is the class annotation
+ * (icons use `%name`, not component names).
  */
 export function renameReferences(cls: ClassDef, oldName: string, newName: string): void {
   const rename: RefVisitor = (ref) => {

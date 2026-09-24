@@ -2,6 +2,7 @@ import { Router } from 'express';
 import type { CustomFunction, ItemsResponse } from '@impact/protocol';
 import type { AppContext } from '../context.js';
 import { notFound } from '../errors.js';
+import { validateIdParams } from '../validate.js';
 
 export const CUSTOM_FUNCTIONS: CustomFunction[] = [
   {
@@ -23,6 +24,7 @@ export const CUSTOM_FUNCTIONS: CustomFunction[] = [
 
 export function customFunctionRoutes(ctx: AppContext): Router {
   const router = Router();
+  validateIdParams(router);
 
   router.get('/:wid/custom-functions', (req, res) => {
     ctx.storage.requireWorkspace(req.params.wid);

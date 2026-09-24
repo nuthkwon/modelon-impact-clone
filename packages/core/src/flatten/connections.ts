@@ -1,10 +1,15 @@
 /**
  * Connection expansion. For every class instance the `connect` statements written in its
- * class (and bases) are grouped into connection sets with a union-find. Per set, potential
- * variables get `n-1` equalities and each flow variable one sum equation
- * `Σ(+inside) + Σ(−outside) = 0`. Causal (scalar input/output) connectors give `a = b`.
- * Unconnected inside flow variables are set to zero; unconnected top-level inputs are bound to
- * their start value with a warning.
+ * class (and bases) are grouped into connection sets with a union-find over the *primitive*
+ * connector variables (Modelica §9.1: hierarchical connectors are expanded first, so a
+ * connector connected as a whole and through one of its sub-connectors ends up in the same
+ * set). Per set, potential variables get `n-1` equalities and each flow variable one sum
+ * equation `Σ(+inside) + Σ(−outside) = 0`. Causal (scalar input/output) connectors give `a = b`.
+ *
+ * Flow variables of inside connectors (ports of sub-components) that no connect touches are
+ * set to zero. The model's own (outside) connectors are closed by the environment (§4.7): every
+ * top-level flow variable gets `flow = 0` and every top-level input without a binding is bound
+ * to its start value, whether or not they are also connected internally.
  */
 import { E, type Expr } from '../ast.js';
 import { flatRef, type FlatEquation } from '../flat.js';
@@ -21,6 +26,14 @@ interface ConnectorRef {
 interface Leaf {
   rel: string;
   v: VariableInstance;
+}
+
+/** A primitive connector variable that takes part in a connection set. */
+interface LeafMember {
+  v: VariableInstance;
+  outside: boolean;
+  /** Path of the connector operand (as written in the first connect that reached this leaf). */
+  via: string;
 }
 
 /** Expands the connections of the whole tree; returns the number of connect statements processed. */
@@ -79,12 +92,32 @@ function describe(r: ConnectorRef): string {
   return r.inst.kind === 'variable' ? `${r.inst.type} variable` : r.inst.cls.fullName;
 }
 
+/** Checks that two connectors have the same primitive variables (names, types, flow prefixes). */
+function checkCompatible(a: ConnectorRef & { inst: ClassInstance }, b: ConnectorRef & { inst: ClassInstance }, leavesA: Leaf[], leavesB: Leaf[], opts: { path: string; loc?: Expr['loc']; file?: string }): void {
+  const mapB = new Map(leavesB.map((l) => [l.rel, l]));
+  const same =
+    leavesA.length === leavesB.length &&
+    leavesA.every((l) => {
+      const o = mapB.get(l.rel);
+      return o !== undefined && o.v.flow === l.v.flow && o.v.type === l.v.type;
+    });
+  if (same) return;
+  const show = (ls: Leaf[]) => `{${ls.map((l) => `${l.v.flow ? 'flow ' : ''}${l.v.type} ${l.rel}`).join(', ')}}`;
+  throw error(`Incompatible connectors: '${a.inst.path}' (${a.inst.cls.fullName}) has ${show(leavesA)} but '${b.inst.path}' (${b.inst.cls.fullName}) has ${show(leavesB)}`, opts);
+}
+
+/** The innermost connector a primitive variable belongs to (for diagnostics / origins). */
+function connectorOf(v: VariableInstance): string {
+  return v.parent.path || v.path;
+}
+
 function expandInstance(ctx: Ctx, inst: ClassInstance, out: FlatEquation[]): number {
+  // Union-find over primitive connector variables (flat paths).
   const parent = new Map<string, string>();
-  const members = new Map<string, ConnectorRef & { inst: ClassInstance }>();
+  const members = new Map<string, LeafMember>();
   const order: string[] = [];
-  const connectedVars = new Set<string>();
-  const connectedConnectors = new Set<string>();
+  /** Every primitive connector variable touched by a connect of this instance (scalar connectors included). */
+  const connectedLeaves = new Set<string>();
   let count = 0;
 
   const find = (x: string): string => {
@@ -99,12 +132,18 @@ function expandInstance(ctx: Ctx, inst: ClassInstance, out: FlatEquation[]): num
     }
     return r;
   };
-  const add = (m: ConnectorRef & { inst: ClassInstance }): void => {
-    if (!members.has(m.inst.path)) {
-      members.set(m.inst.path, m);
-      parent.set(m.inst.path, m.inst.path);
-      order.push(m.inst.path);
+  const add = (v: VariableInstance, outside: boolean, via: string): void => {
+    connectedLeaves.add(v.path);
+    if (!members.has(v.path)) {
+      members.set(v.path, { v, outside, via });
+      parent.set(v.path, v.path);
+      order.push(v.path);
     }
+  };
+  const union = (a: string, b: string): void => {
+    const rootA = find(a);
+    const rootB = find(b);
+    if (rootA !== rootB) parent.set(rootB, rootA);
   };
 
   for (const c of inst.connects) {
@@ -128,26 +167,29 @@ function expandInstance(ctx: Ctx, inst: ClassInstance, out: FlatEquation[]): num
         loc: c.loc,
         file: opts.file,
       });
-      connectedVars.add(ra.inst.path);
-      connectedVars.add(rb.inst.path);
+      connectedLeaves.add(ra.inst.path);
+      connectedLeaves.add(rb.inst.path);
       continue;
     }
     if (ra.inst.kind === 'class' && rb.inst.kind === 'class' && ra.inst.isConnector && rb.inst.isConnector) {
       const ma = { ...ra, inst: ra.inst };
       const mb = { ...rb, inst: rb.inst };
-      add(ma);
-      add(mb);
-      const rootA = find(ma.inst.path);
-      const rootB = find(mb.inst.path);
-      if (rootA !== rootB) parent.set(rootB, rootA);
-      connectedConnectors.add(ma.inst.path);
-      connectedConnectors.add(mb.inst.path);
+      const leavesA = collectLeaves(ma.inst);
+      const leavesB = collectLeaves(mb.inst);
+      checkCompatible(ma, mb, leavesA, leavesB, opts);
+      const mapB = new Map(leavesB.map((l) => [l.rel, l]));
+      for (const la of leavesA) {
+        const lb = mapB.get(la.rel)!;
+        add(la.v, ma.outside, ma.inst.path);
+        add(lb.v, mb.outside, mb.inst.path);
+        union(la.v.path, lb.v.path);
+      }
       continue;
     }
     throw error(`Incompatible connectors: cannot connect '${ra.inst.path}' (${describe(ra)}) with '${rb.inst.path}' (${describe(rb)})`, opts);
   }
 
-  // Connection sets in order of first appearance.
+  // Connection sets (of primitive variables) in order of first appearance.
   const sets = new Map<string, string[]>();
   for (const path of order) {
     const r = find(path);
@@ -158,51 +200,32 @@ function expandInstance(ctx: Ctx, inst: ClassInstance, out: FlatEquation[]): num
   const file = fileOf(ctx, inst.cls);
   for (const paths of sets.values()) {
     const ms = paths.map((p) => members.get(p)!);
-    const leaves = ms.map((m) => collectLeaves(m.inst));
-    const first = leaves[0];
-    const firstMap = new Map(first.map((l) => [l.rel, l]));
-    for (let i = 1; i < ms.length; i++) {
-      const map = new Map(leaves[i].map((l) => [l.rel, l]));
-      const same =
-        map.size === firstMap.size &&
-        [...firstMap.values()].every((l) => {
-          const o = map.get(l.rel);
-          return o !== undefined && o.v.flow === l.v.flow && o.v.type === l.v.type;
+    const vias: string[] = [];
+    for (const m of ms) if (!vias.includes(m.via)) vias.push(m.via);
+    if (!ms[0].v.flow) {
+      for (let i = 1; i < ms.length; i++) {
+        out.push({
+          kind: 'connect-potential',
+          left: flatRef(ms[0].v.path),
+          right: flatRef(ms[i].v.path),
+          origin: `connect(${ms[0].via}, ${ms[i].via})`,
+          file,
         });
-      if (!same) {
-        const show = (ls: Leaf[]) => `{${ls.map((l) => `${l.v.flow ? 'flow ' : ''}${l.v.type} ${l.rel}`).join(', ')}}`;
-        throw error(
-          `Incompatible connectors: '${ms[0].inst.path}' (${ms[0].inst.cls.fullName}) has ${show(first)} but '${ms[i].inst.path}' (${ms[i].inst.cls.fullName}) has ${show(leaves[i])}`,
-          { path: inst.path || inst.cls.fullName, file },
-        );
       }
-    }
-    const allText = `connect(${ms.map((m) => m.inst.path).join(', ')})`;
-    for (const leaf of first) {
-      if (!leaf.v.flow) {
-        for (let i = 1; i < ms.length; i++) {
-          const other = leaves[i].find((l) => l.rel === leaf.rel)!;
-          out.push({
-            kind: 'connect-potential',
-            left: flatRef(leaf.v.path),
-            right: flatRef(other.v.path),
-            origin: `connect(${ms[0].inst.path}, ${ms[i].inst.path})`,
-            file,
-          });
-        }
-      } else {
-        let sum: Expr | undefined;
-        for (let i = 0; i < ms.length; i++) {
-          const term = flatRef(leaves[i].find((l) => l.rel === leaf.rel)!.v.path);
-          if (sum === undefined) sum = ms[i].outside ? E.neg(term) : term;
-          else sum = E.bin(ms[i].outside ? '-' : '+', sum, term);
-        }
-        out.push({ kind: 'connect-flow', left: sum!, right: E.num(0), origin: allText, file });
+    } else {
+      let sum: Expr | undefined;
+      for (const m of ms) {
+        const term = flatRef(m.v.path);
+        if (sum === undefined) sum = m.outside ? E.neg(term) : term;
+        else sum = E.bin(m.outside ? '-' : '+', sum, term);
       }
+      out.push({ kind: 'connect-flow', left: sum!, right: E.num(0), origin: `connect(${vias.join(', ')})`, file });
     }
   }
 
-  // Unconnected inside connectors (ports of sub-components) and inputs.
+  // Inside connectors (ports of sub-components): flow variables no connect touches are zero,
+  // unconnected inputs get a warning. Decided per primitive variable, so a hierarchical
+  // connector connected through some of its sub-connectors only zeroes the others.
   for (const childName of inst.order) {
     const child = inst.components.get(childName);
     if (!child || child.kind !== 'class' || child.isConnector) continue;
@@ -210,31 +233,49 @@ function expandInstance(ctx: Ctx, inst: ClassInstance, out: FlatEquation[]): num
       const port = child.components.get(portName);
       if (!port) continue;
       if (port.kind === 'class' && port.isConnector) {
-        if (connectedConnectors.has(port.path)) continue;
         for (const leaf of collectLeaves(port)) {
-          if (leaf.v.flow) out.push({ kind: 'unconnected-flow', left: flatRef(leaf.v.path), right: E.num(0), origin: `${port.path} (unconnected)`, file });
+          if (leaf.v.flow && !connectedLeaves.has(leaf.v.path)) {
+            out.push({ kind: 'unconnected-flow', left: flatRef(leaf.v.path), right: E.num(0), origin: `${connectorOf(leaf.v)} (unconnected)`, file });
+          }
         }
-      } else if (port.kind === 'variable' && port.causality === 'input' && !connectedVars.has(port.path) && !port.binding) {
+      } else if (port.kind === 'variable' && port.causality === 'input' && !connectedLeaves.has(port.path) && !port.binding) {
         diag(ctx, 'warning', `Input '${port.path}' is not connected`, { path: port.path, loc: port.decl.loc, file: fileOf(ctx, port.declaredIn) });
       }
     }
   }
 
-  // The top-level class: its own unconnected ports.
+  // The top-level class: the environment supplies one equation per flow variable of its own
+  // connectors (`flow = 0`, nothing is connected from outside) and one per input without a
+  // binding (its start value), independently of any internal connection (Modelica §4.7).
   if (!inst.parent) {
     for (const name of inst.order) {
       const port = inst.components.get(name);
       if (!port) continue;
       if (port.kind === 'class' && port.isConnector) {
-        if (connectedConnectors.has(port.path)) continue;
         for (const leaf of collectLeaves(port)) {
-          if (leaf.v.flow) out.push({ kind: 'unconnected-flow', left: flatRef(leaf.v.path), right: E.num(0), origin: `${port.path} (unconnected)`, file });
+          if (!leaf.v.flow) continue;
+          const connected = connectedLeaves.has(leaf.v.path);
+          out.push({
+            kind: 'unconnected-flow',
+            left: flatRef(leaf.v.path),
+            right: E.num(0),
+            origin: `${connectorOf(leaf.v)} (${connected ? 'top-level connector, flow set by the environment' : 'unconnected'})`,
+            file,
+          });
         }
-      } else if (port.kind === 'variable' && port.causality === 'input' && !isParamLike(port) && !connectedVars.has(port.path) && !port.binding) {
+      } else if (port.kind === 'variable' && port.causality === 'input' && !isParamLike(port) && !port.binding) {
         const start = port.flat?.attributes.start;
         const value: Expr =
           typeof start === 'number' ? E.num(start) : typeof start === 'boolean' ? E.bool(start) : port.type === 'Boolean' ? E.bool(false) : E.num(0);
-        out.push({ kind: 'binding', left: flatRef(port.path), right: value, origin: `${port.path} (unconnected top-level input)`, loc: port.decl.loc, file });
+        const connected = connectedLeaves.has(port.path);
+        out.push({
+          kind: 'binding',
+          left: flatRef(port.path),
+          right: value,
+          origin: `${port.path} (${connected ? 'top-level input, value set by the environment' : 'unconnected top-level input'})`,
+          loc: port.decl.loc,
+          file,
+        });
         diag(ctx, 'warning', `Top-level input '${port.path}' has no value; using ${printExpr(value)}`, { path: port.path, loc: port.decl.loc, file: fileOf(ctx, port.declaredIn) });
       }
     }

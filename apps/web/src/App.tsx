@@ -7,6 +7,7 @@ import { HomePage } from './pages/HomePage';
 import { WorkspacePage } from './pages/WorkspacePage';
 import { ContextMenuHost } from './components/common/ContextMenu';
 import { ShellDialogs } from './components/shell/ShellDialogs';
+import { decodePathSegment } from './hooks/useUrlSync';
 
 export function usePath(): [string, (path: string) => void] {
   const [path, setPath] = useState(window.location.pathname);
@@ -29,7 +30,7 @@ export function App() {
   const m = /^\/workspaces\/([^/]+)/.exec(path);
   return (
     <>
-      {m ? <WorkspacePage key={m[1]} workspaceId={decodeURIComponent(m[1])} navigate={navigate} /> : <HomePage navigate={navigate} />}
+      {m ? <WorkspacePage key={m[1]} workspaceId={decodePathSegment(m[1])} navigate={navigate} /> : <HomePage navigate={navigate} />}
       <ShellDialogs />
       <ContextMenuHost />
     </>

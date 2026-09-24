@@ -10,7 +10,7 @@ import {
   flatRef,
 } from '@impact/core';
 import type { Diagnostic, DiagramView, EditOperation, EditResult, Point } from '@impact/core';
-import type { CaseDto, CreateExperimentRequest, ExperimentDto } from '@impact/protocol';
+import type { CaseDto, ClassSourceDto, CreateExperimentRequest, ExperimentDto } from '@impact/protocol';
 import { api, ApiClientError } from '../api/client';
 import type {
   AnalysisSettings,
@@ -74,12 +74,59 @@ export function pointsOf(a: AnalysisSettings): number {
   return a.interval > 0 ? Math.max(1, Math.round(span / a.interval)) : 500;
 }
 
-/** Expands `range(a,b,n)` / `choices(...)` modifier text into the number of cases. */
+// The sweep grammar below mirrors the server's expansion (apps/server/src/cases.ts: parseSweep /
+// splitArgs) so the "N cases" chips agree with the number of cases a run actually creates.
+const RANGE_RE = /^\s*range\s*\((.*)\)\s*$/is;
+const CHOICES_RE = /^\s*choices\s*\((.*)\)\s*$/is;
+
+/** Splits on commas that are not inside quotes or brackets (same rules as the server). */
+export function splitSweepArgs(text: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let quote: string | undefined;
+  let cur = '';
+  for (const ch of text) {
+    if (quote) {
+      cur += ch;
+      if (ch === quote) quote = undefined;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      cur += ch;
+    } else if (ch === '(' || ch === '[' || ch === '{') {
+      depth++;
+      cur += ch;
+    } else if (ch === ')' || ch === ']' || ch === '}') {
+      depth--;
+      cur += ch;
+    } else if (ch === ',' && depth === 0) {
+      out.push(cur);
+      cur = '';
+    } else {
+      cur += ch;
+    }
+  }
+  if (cur.trim() !== '' || out.length) out.push(cur);
+  return out.map((t) => t.trim()).filter((t) => t !== '');
+}
+
+/**
+ * Number of cases a modifier text expands to: `range(start, end, n)` -> n (any finite
+ * integer-valued number >= 1), `choices(v1, v2, …)` -> number of values. Anything else — including
+ * malformed sweeps, which the server rejects with 400 — counts as a single case.
+ */
 export function modifierCaseCount(text: string): number {
-  const range = /^\s*range\s*\(\s*([^,]+),\s*([^,]+),\s*(\d+)\s*\)\s*$/i.exec(text);
-  if (range) return Math.max(1, parseInt(range[3], 10));
-  const choices = /^\s*choices\s*\(([^)]*)\)\s*$/i.exec(text);
-  if (choices) return Math.max(1, choices[1].split(',').filter((s) => s.trim()).length);
+  const range = RANGE_RE.exec(text);
+  if (range) {
+    const args = splitSweepArgs(range[1]);
+    if (args.length !== 3) return 1;
+    const [a, b, n] = args.map((t) => Number(t));
+    if (![a, b, n].every(Number.isFinite) || !Number.isInteger(n) || n < 1) return 1;
+    return n;
+  }
+  const choices = CHOICES_RE.exec(text);
+  if (choices) return Math.max(1, splitSweepArgs(choices[1]).length);
   return 1;
 }
 
@@ -97,6 +144,7 @@ interface Persisted {
   favorites: Record<string, string[]>;
   plotCounter: number;
   resultNames: Record<string, string>;
+  resultCounter?: number;
 }
 
 function loadPersisted(wid: string): Partial<Persisted> {
@@ -185,6 +233,55 @@ export function analysisToRequest(exp: Experiment): CreateExperimentRequest {
 }
 
 // ---------------------------------------------------------------------------
+// shared trajectory requests
+// ---------------------------------------------------------------------------
+
+const TRAJECTORY_CHUNK = 200;
+/** How long a failed trajectory request keeps render-path (implicit) fetches from retrying it. */
+const FAILED_TRAJECTORY_RETRY_MS = 15_000;
+/** In-flight trajectory requests keyed `${resultId}/${caseId}/${variable}`; concurrent callers share one request. */
+export const pendingTrajectories = new Map<string, Promise<void>>();
+/** Variables collected per `${resultId}/${caseId}` for the next request; flushed in a microtask so one render pass costs one request. */
+const trajectoryBatches = new Map<string, { variables: Set<string>; promise: Promise<void> }>();
+/** Keys whose last request failed -> failure time. */
+const failedTrajectories = new Map<string, number>();
+
+const trajectoryKey = (resultId: string, caseId: string, variable: string): string => `${resultId}/${caseId}/${variable}`;
+
+/** Slices that belong to one workspace and must not leak into the next (editor, history, run, results, logs, banners). */
+function workspaceScopedReset(detailsTab: string): Partial<AppState> {
+  return {
+    activeClass: undefined,
+    mode: 'model',
+    view: 'diagram',
+    selection: [],
+    selectedConnection: undefined,
+    diagram: undefined,
+    diagramError: undefined,
+    undoStack: [],
+    redoStack: [],
+    codeDraft: undefined,
+    detailsTab: ['PROPERTIES', 'INFORMATION', 'COMPONENTS'].includes(detailsTab) ? detailsTab : 'PROPERTIES',
+    running: undefined,
+    results: [],
+    activeResult: {},
+    compilationLog: '',
+    simulationLog: '',
+    logOpen: false,
+    logHasErrors: false,
+    banners: [],
+    trajectories: {},
+    resultVariables: {},
+    sliderTime: 0,
+    sliderPlaying: false,
+    caseIndex: 0,
+    fileVersions: {},
+  };
+}
+
+const RESULT_LABEL_RE = /^Result(\d+)$/;
+
+// ---------------------------------------------------------------------------
 // store
 // ---------------------------------------------------------------------------
 
@@ -202,6 +299,7 @@ export const useStore = create<AppState>()((set, get) => {
       favorites: s.favorites,
       plotCounter: s.plotCounter,
       resultNames: {},
+      resultCounter: s.resultCounter,
     };
     try {
       localStorage.setItem(persistKey(s.workspaceId), JSON.stringify(data));
@@ -223,6 +321,195 @@ export const useStore = create<AppState>()((set, get) => {
     const f = get().registry.fileOf(className);
     return f ? { libraryId: f.libraryId, path: f.path } : undefined;
   };
+  type FileKey = { libraryId: string; path: string };
+  const fkOf = (f: FileKey): string => ClassRegistry.fileKey(f.libraryId, f.path);
+
+  const setFileVersion = (fk: string, version: number | undefined) => {
+    const fileVersions = { ...get().fileVersions };
+    if (version === undefined) delete fileVersions[fk];
+    else fileVersions[fk] = version;
+    set({ fileVersions });
+  };
+
+  const setFileDiagnostics = (fk: string, diags: Diagnostic[]) => {
+    const fd = { ...get().fileDiagnostics };
+    if (diags.length) fd[fk] = diags;
+    else delete fd[fk];
+    set({ fileDiagnostics: fd });
+  };
+
+  // ---- serialised, versioned source writes -------------------------------------------------
+  /** Tail of the write queue per file key: full-file PUTs of one file reach the server strictly in order. */
+  const writeChains = new Map<string, Promise<unknown>>();
+  /** Generation per file key; bumped when a write fails so writes queued on top of the discarded text are dropped. */
+  const fileGenerations = new Map<string, number>();
+  const genOf = (fk: string): number => fileGenerations.get(fk) ?? 0;
+  const bumpGen = (fk: string): void => void fileGenerations.set(fk, genOf(fk) + 1);
+
+  type WriteOutcome = { ok: true; skipped: false; version: number; text: string } | { ok: false; skipped: true } | { ok: false; skipped: false; error: unknown };
+  const statusOf = (e: unknown): number | undefined => (e instanceof ApiClientError ? e.status : undefined);
+
+  /**
+   * Queues a full-file PUT of `text` for the file declaring `className`. The server's file version is
+   * sent along: it is known from an earlier response, or fetched first — in which case the server text
+   * must still equal `baseText` (the text the change was computed from), otherwise the write is treated
+   * as a 409. Never throws; the outcome says whether the write succeeded, failed or was dropped because
+   * the workspace changed or an earlier write of the file failed.
+   */
+  const writeSource = (wid: string, className: string, key: FileKey, text: string, baseText: string): Promise<WriteOutcome> => {
+    const fk = fkOf(key);
+    const gen = genOf(fk);
+    const job = async (): Promise<WriteOutcome> => {
+      if (get().workspaceId !== wid || genOf(fk) !== gen) return { ok: false, skipped: true };
+      try {
+        let version = get().fileVersions[fk];
+        if (version === undefined) {
+          const dto = await api.getClassSource(wid, className);
+          if (dto.text !== baseText) throw new ApiClientError(409, { error: { code: 'conflict', message: `'${key.path}' was changed on the server` } }, 'conflict');
+          version = dto.version;
+        }
+        const res = await api.updateClassSource(wid, className, { text, version });
+        if (get().workspaceId === wid) setFileVersion(fk, res.version);
+        return { ok: true, skipped: false, version: res.version, text: res.text };
+      } catch (error) {
+        bumpGen(fk);
+        return { ok: false, skipped: false, error };
+      }
+    };
+    const prev = writeChains.get(fk) ?? Promise.resolve();
+    const next = prev.then(job, job);
+    writeChains.set(fk, next);
+    void next.then(() => {
+      if (writeChains.get(fk) === next) writeChains.delete(fk);
+    });
+    return next;
+  };
+
+  const dropHistoryOf = (fk: string) => set({ undoStack: get().undoStack.filter((h) => fkOf(h) !== fk), redoStack: get().redoStack.filter((h) => fkOf(h) !== fk) });
+
+  /**
+   * Resynchronises a file after the server rejected a write for it (409: changed elsewhere, 404:
+   * deleted): the server text replaces the local file (or the file is removed), the file's undo/redo
+   * history is dropped (it no longer describes the file) and a banner explains what happened.
+   */
+  const resyncFile = async (wid: string, className: string, key: FileKey, error: unknown): Promise<void> => {
+    const fk = fkOf(key);
+    let gone = statusOf(error) === 404;
+    let dto: ClassSourceDto | undefined;
+    if (!gone) {
+      try {
+        dto = await api.getClassSource(wid, className);
+      } catch (e) {
+        if (statusOf(e) === 404) gone = true;
+      }
+    }
+    if (get().workspaceId !== wid) return;
+    const registry = get().registry;
+    if (dto) {
+      setFileDiagnostics(fk, registry.addFile(dto.libraryId, dto.file, dto.text));
+      setFileVersion(fk, dto.version);
+    } else if (gone) {
+      registry.removeFile(key.libraryId, key.path);
+      setFileDiagnostics(fk, []);
+      setFileVersion(fk, undefined);
+    } else {
+      // Could not reload either: forget the version so the next write re-validates against the server.
+      setFileVersion(fk, undefined);
+    }
+    dropHistoryOf(fk);
+    const active = get().activeClass;
+    set({ registryVersion: get().registryVersion + 1, activeClass: active && !registry.has(active) ? undefined : active });
+    set(computeDiagram(get().activeClass));
+    const reason = diagnosticsOf(error)[0]?.message ?? 'unknown error';
+    const message = gone
+      ? `${className} no longer exists on the server; it was removed from the workspace.`
+      : dto
+        ? `The file was changed elsewhere; reloaded ${key.path} from the server. Your last change was not saved.`
+        : `Saving ${className} failed (${reason}) and the file could not be reloaded from the server.`;
+    get().pushBanner({ severity: gone ? 'warning' : 'error', message, className });
+  };
+
+  /**
+   * Reverts an optimistic edit whose write failed for a reason other than a conflict: the file goes
+   * back to the text before the edit, and the edit plus every later (unsent, now dropped) edit of the
+   * same file leave the history. The redo history cleared by the edit is restored when nothing was
+   * edited since.
+   */
+  const revertFailedEdit = (entry: HistoryEntry, prevRedo: HistoryEntry[], error: unknown): void => {
+    const fk = fkOf(entry);
+    const stack = get().undoStack;
+    const idx = stack.indexOf(entry);
+    if (idx < 0) return; // already handled (e.g. by a resync)
+    const dropped = new Set(stack.slice(idx).filter((h) => fkOf(h) === fk));
+    get().registry.addFile(entry.libraryId, entry.path, entry.before);
+    set({
+      registryVersion: get().registryVersion + 1,
+      undoStack: stack.filter((h) => !dropped.has(h)),
+      redoStack: idx === stack.length - 1 ? prevRedo : get().redoStack.filter((h) => fkOf(h) !== fk),
+    });
+    set(computeDiagram(get().activeClass));
+    for (const d of diagnosticsOf(error)) get().pushBanner({ severity: 'error', message: `Saving ${entry.className} failed: ${d.message} The change was reverted.`, loc: d.loc, className: entry.className });
+  };
+
+  /** Failure path shared by undo()/redo(): conflicts resync the file, anything else puts text and history back. */
+  const recoverHistoryWrite = async (wid: string, entry: HistoryEntry, previousText: string, direction: 'undo' | 'redo', prevUndo: HistoryEntry[], prevRedo: HistoryEntry[], error: unknown): Promise<void> => {
+    const key = { libraryId: entry.libraryId, path: entry.path };
+    const status = statusOf(error);
+    if (status === 409 || status === 404) return resyncFile(wid, entry.className, key, error);
+    const fk = fkOf(key);
+    get().registry.addFile(key.libraryId, key.path, previousText);
+    // Entries of this file added while the write was pending were built on the reverted text: drop them.
+    const keep = (h: HistoryEntry, before: HistoryEntry[]) => fkOf(h) !== fk || before.includes(h);
+    if (direction === 'undo') {
+      set({ undoStack: [...get().undoStack.filter((h) => h !== entry && keep(h, prevUndo)), entry], redoStack: get().redoStack.filter((h) => h !== entry && keep(h, prevRedo)) });
+    } else {
+      set({ redoStack: [...get().redoStack.filter((h) => h !== entry && keep(h, prevRedo)), entry], undoStack: get().undoStack.filter((h) => h !== entry && keep(h, prevUndo)) });
+    }
+    set({ registryVersion: get().registryVersion + 1 });
+    set(computeDiagram(get().activeClass));
+    const reason = diagnosticsOf(error)[0]?.message ?? 'unknown error';
+    get().pushBanner({ severity: 'error', message: `Could not ${direction} the last change of ${entry.className}: ${reason}`, className: entry.className });
+  };
+
+  /** Issues one request for a batch of variables and caches the result; shared by all callers waiting on it. */
+  const requestTrajectories = async (wid: string, resultId: string, caseId: string, names: string[]): Promise<void> => {
+    try {
+      const chunks: string[][] = [];
+      for (let i = 0; i < names.length; i += TRAJECTORY_CHUNK) chunks.push(names.slice(i, i + TRAJECTORY_CHUNK));
+      const data = await Promise.all(chunks.map((chunk) => api.getCaseTrajectories(wid, resultId, caseId, { variable_names: chunk })));
+      if (get().workspaceId !== wid) return;
+      const patch: Record<string, number[]> = {};
+      chunks.forEach((chunk, ci) => chunk.forEach((v, i) => (patch[trajectoryKey(resultId, caseId, v)] = data[ci][i] ?? [])));
+      set({ trajectories: { ...get().trajectories, ...patch } });
+    } catch (e) {
+      const now = Date.now();
+      for (const v of names) failedTrajectories.set(trajectoryKey(resultId, caseId, v), now);
+      throw e;
+    } finally {
+      for (const v of names) pendingTrajectories.delete(trajectoryKey(resultId, caseId, v));
+    }
+  };
+
+  /**
+   * `Result${n}`: n is one above every `ResultN` the workspace already has (server list, so other
+   * clients count too) and above every number handed out before (persisted), which keeps names unique
+   * and monotonic even after results were deleted. Impact numbers results per workspace.
+   */
+  const nextResultLabel = async (wid: string): Promise<string> => {
+    const labels = await api.listExperiments(wid).then(
+      (r) => r.data.items.map((e) => e.meta_data.label),
+      () => get().results.map((r) => r.name),
+    );
+    let max = get().resultCounter;
+    for (const label of labels) {
+      const m = RESULT_LABEL_RE.exec(label);
+      if (m) max = Math.max(max, Number(m[1]));
+    }
+    const n = max + 1;
+    set({ resultCounter: n });
+    persist();
+    return `Result${n}`;
+  };
 
   const settings = loadSettings();
   applyTheme(settings);
@@ -237,11 +524,16 @@ export const useStore = create<AppState>()((set, get) => {
     registry: new ClassRegistry(),
     registryVersion: 0,
     fileDiagnostics: {},
+    fileVersions: {},
     loading: false,
     loadError: undefined,
 
     async loadWorkspace(wid) {
-      set({ loading: true, loadError: undefined, workspaceId: wid });
+      // Everything scoped to the previous workspace (open class, history, running job, results, banners…)
+      // is dropped before the new one loads, so e.g. Ctrl+Z can never replay another workspace's edit.
+      const switching = get().workspaceId !== wid;
+      set({ loading: true, loadError: undefined, workspaceId: wid, ...(switching ? workspaceScopedReset(get().detailsTab) : {}) });
+      if (switching) failedTrajectories.clear();
       try {
         const [ws, projects, deps, libs] = await Promise.all([api.getWorkspace(wid), api.listProjects(wid), api.listDependencies(wid), api.listLibraries(wid)]);
         const registry = new ClassRegistry();
@@ -259,6 +551,7 @@ export const useStore = create<AppState>()((set, get) => {
           }
         }
         const persisted = loadPersisted(wid);
+        if (get().workspaceId !== wid) return; // another workspace was opened meanwhile
         set({
           workspace: ws,
           projects: projects.data.items,
@@ -276,13 +569,16 @@ export const useStore = create<AppState>()((set, get) => {
           viewports: persisted.viewports ?? {},
           favorites: persisted.favorites ?? {},
           plotCounter: persisted.plotCounter ?? 0,
+          resultCounter: persisted.resultCounter ?? 0,
           results: [],
           activeResult: {},
           trajectories: {},
           resultVariables: {},
+          fileVersions: {},
         });
         await get().loadResults();
       } catch (e) {
+        if (get().workspaceId !== wid) return;
         set({ loading: false, loadError: e instanceof Error ? e.message : String(e) });
       }
     },
@@ -291,28 +587,34 @@ export const useStore = create<AppState>()((set, get) => {
       const wid = get().workspaceId;
       const key = fileKeyOf(className);
       if (!wid || !key) return { ok: false, diagnostics: [{ severity: 'error', message: `Unknown class ${className}` }] };
-      try {
-        const res = await api.updateClassSource(wid, className, { text });
-        const registry = get().registry;
-        const diags = registry.addFile(key.libraryId, key.path, res.text);
-        const fd = { ...get().fileDiagnostics };
-        const fk = ClassRegistry.fileKey(key.libraryId, key.path);
-        if (diags.length) fd[fk] = diags;
-        else delete fd[fk];
-        set({ registryVersion: get().registryVersion + 1, fileDiagnostics: fd, codeDraft: undefined });
-        set(computeDiagram(get().activeClass));
-        return { ok: true, diagnostics: [] };
-      } catch (e) {
-        return { ok: false, diagnostics: diagnosticsOf(e) };
+      const registry = get().registry;
+      const base = registry.getFile(key.libraryId, key.path)?.text ?? '';
+      const outcome = await writeSource(wid, className, key, text, base);
+      if (outcome.skipped) return { ok: false, diagnostics: [{ severity: 'error', message: `${className} was reloaded while saving; please save again.` }] };
+      if (!outcome.ok) {
+        const status = statusOf(outcome.error);
+        if (status === 409 || status === 404) {
+          await resyncFile(wid, className, key, outcome.error);
+          const message = status === 404 ? `${className} no longer exists on the server.` : 'The file was changed elsewhere; reloaded from the server. Please re-apply your change.';
+          return { ok: false, diagnostics: [{ severity: 'error', message }] };
+        }
+        return { ok: false, diagnostics: diagnosticsOf(outcome.error) };
       }
+      if (get().workspaceId !== wid) return { ok: true, diagnostics: [] };
+      setFileDiagnostics(fkOf(key), registry.addFile(key.libraryId, key.path, outcome.text));
+      set({ registryVersion: get().registryVersion + 1, codeDraft: undefined });
+      set(computeDiagram(get().activeClass));
+      return { ok: true, diagnostics: [] };
     },
 
     async createClass(req) {
       const wid = get().workspaceId;
       if (!wid) throw new Error('No workspace');
       const res = await api.createClass(wid, req);
+      if (get().workspaceId !== wid) return req.className;
       const registry = get().registry;
       registry.addFile(res.libraryId, res.file, res.text);
+      setFileVersion(fkOf({ libraryId: res.libraryId, path: res.file }), res.version);
       // refresh library bundle list lazily
       set({ registryVersion: get().registryVersion + 1 });
       return req.className;
@@ -325,12 +627,24 @@ export const useStore = create<AppState>()((set, get) => {
       await api.deleteClass(wid, className);
       // Reload the library bundle that changed.
       const lib = await api.getLibrary(wid, key.libraryId);
+      if (get().workspaceId !== wid) return;
       const registry = get().registry;
       registry.removeLibrary(key.libraryId);
       registry.addLibrary({ id: lib.libraryId, name: lib.name, readOnly: lib.readOnly });
       for (const f of lib.files) registry.addFile(lib.libraryId, f.path, f.text);
       const active = get().activeClass;
-      set({ registryVersion: get().registryVersion + 1, activeClass: active === className || active?.startsWith(`${className}.`) ? undefined : active });
+      // Bundles carry no per-file versions: forget the library's versions (re-validated on the next write)
+      // and drop history entries of files that are gone, so undo cannot resurrect a deleted class.
+      const prefix = ClassRegistry.fileKey(key.libraryId, '');
+      const fileVersions = Object.fromEntries(Object.entries(get().fileVersions).filter(([k]) => !k.startsWith(prefix)));
+      const exists = (h: HistoryEntry) => registry.getFile(h.libraryId, h.path) !== undefined;
+      set({
+        registryVersion: get().registryVersion + 1,
+        fileVersions,
+        undoStack: get().undoStack.filter(exists),
+        redoStack: get().redoStack.filter(exists),
+        activeClass: active === className || active?.startsWith(`${className}.`) ? undefined : active,
+      });
       set(computeDiagram(get().activeClass));
     },
 
@@ -423,43 +737,68 @@ export const useStore = create<AppState>()((set, get) => {
         for (const d of result.diagnostics) get().pushBanner({ severity: d.severity, message: d.message, loc: d.loc, className: target });
         return result;
       }
-      // optimistic local update
+      // optimistic local update; the write is queued behind earlier writes of the same file
       registry.addFile(key.libraryId, key.path, result.text);
-      const entry: HistoryEntry = { ...key, before, after: result.text, className: target };
+      const entry: HistoryEntry = { workspaceId: wid, ...key, before, after: result.text, className: target };
+      const prevRedo = get().redoStack;
       set({ registryVersion: get().registryVersion + 1, undoStack: [...get().undoStack, entry].slice(-100), redoStack: [] });
       set(computeDiagram(get().activeClass));
-      try {
-        await api.updateClassSource(wid, target, { text: result.text });
-      } catch (e) {
-        registry.addFile(key.libraryId, key.path, before);
-        set({ registryVersion: get().registryVersion + 1, undoStack: get().undoStack.filter((h) => h !== entry) });
-        set(computeDiagram(get().activeClass));
-        for (const d of diagnosticsOf(e)) get().pushBanner({ severity: 'error', message: d.message, loc: d.loc, className: target });
-        return undefined;
-      }
-      return result;
+      const outcome = await writeSource(wid, target, key, result.text, before);
+      if (outcome.ok) return result;
+      if (outcome.skipped || get().workspaceId !== wid) return undefined; // dropped: an earlier write of the file failed and reverted/reloaded it
+      const status = statusOf(outcome.error);
+      if (status === 409 || status === 404) await resyncFile(wid, target, key, outcome.error);
+      else revertFailedEdit(entry, prevRedo, outcome.error);
+      return undefined;
     },
 
     async undo() {
-      const stack = get().undoStack;
-      const entry = stack[stack.length - 1];
       const wid = get().workspaceId;
-      if (!entry || !wid) return;
-      get().registry.addFile(entry.libraryId, entry.path, entry.before);
-      set({ undoStack: stack.slice(0, -1), redoStack: [...get().redoStack, entry], registryVersion: get().registryVersion + 1 });
+      if (!wid) return;
+      const registry = get().registry;
+      // Entries made in another workspace or for files that no longer exist are not replayable: drop them.
+      const usable = (h: HistoryEntry) => h.workspaceId === wid && registry.getFile(h.libraryId, h.path) !== undefined;
+      let stack = get().undoStack;
+      while (stack.length && !usable(stack[stack.length - 1])) stack = stack.slice(0, -1);
+      const entry = stack[stack.length - 1];
+      if (!entry) {
+        if (stack.length !== get().undoStack.length) set({ undoStack: stack });
+        return;
+      }
+      const key = { libraryId: entry.libraryId, path: entry.path };
+      const current = registry.getFile(key.libraryId, key.path)!.text;
+      const prevUndo = get().undoStack;
+      const prevRedo = get().redoStack;
+      registry.addFile(key.libraryId, key.path, entry.before);
+      set({ undoStack: stack.slice(0, -1), redoStack: [...prevRedo, entry], registryVersion: get().registryVersion + 1 });
       set(computeDiagram(get().activeClass));
-      await api.updateClassSource(wid, entry.className, { text: entry.before }).catch(() => undefined);
+      const outcome = await writeSource(wid, entry.className, key, entry.before, current);
+      if (outcome.ok || outcome.skipped || get().workspaceId !== wid) return;
+      await recoverHistoryWrite(wid, entry, current, 'undo', prevUndo, prevRedo, outcome.error);
     },
 
     async redo() {
-      const stack = get().redoStack;
-      const entry = stack[stack.length - 1];
       const wid = get().workspaceId;
-      if (!entry || !wid) return;
-      get().registry.addFile(entry.libraryId, entry.path, entry.after);
-      set({ redoStack: stack.slice(0, -1), undoStack: [...get().undoStack, entry], registryVersion: get().registryVersion + 1 });
+      if (!wid) return;
+      const registry = get().registry;
+      const usable = (h: HistoryEntry) => h.workspaceId === wid && registry.getFile(h.libraryId, h.path) !== undefined;
+      let stack = get().redoStack;
+      while (stack.length && !usable(stack[stack.length - 1])) stack = stack.slice(0, -1);
+      const entry = stack[stack.length - 1];
+      if (!entry) {
+        if (stack.length !== get().redoStack.length) set({ redoStack: stack });
+        return;
+      }
+      const key = { libraryId: entry.libraryId, path: entry.path };
+      const current = registry.getFile(key.libraryId, key.path)!.text;
+      const prevUndo = get().undoStack;
+      const prevRedo = get().redoStack;
+      registry.addFile(key.libraryId, key.path, entry.after);
+      set({ redoStack: stack.slice(0, -1), undoStack: [...prevUndo, entry], registryVersion: get().registryVersion + 1 });
       set(computeDiagram(get().activeClass));
-      await api.updateClassSource(wid, entry.className, { text: entry.after }).catch(() => undefined);
+      const outcome = await writeSource(wid, entry.className, key, entry.after, current);
+      if (outcome.ok || outcome.skipped || get().workspaceId !== wid) return;
+      await recoverHistoryWrite(wid, entry, current, 'redo', prevUndo, prevRedo, outcome.error);
     },
 
     refreshDiagram() {
@@ -614,18 +953,17 @@ export const useStore = create<AppState>()((set, get) => {
     sliderTime: 0,
     sliderPlaying: false,
     caseIndex: 0,
+    resultCounter: 0,
 
     async simulate(kind = 'dynamic') {
       const wid = get().workspaceId;
       const className = get().activeClass;
       if (!wid || !className || get().running) return;
+      // Once the user opens another workspace this run must not touch the store any more.
+      const stale = () => get().workspaceId !== wid;
       const exp = get().ensureExperiment(className);
       const request = analysisToRequest(exp);
       if (kind === 'steady state') request.experiment.base.analysis = { ...request.experiment.base.analysis, type: 'steady state', parameters: { start_time: exp.analysis.startTime } };
-      const resultsForClass = get().results.filter((r) => r.className === className);
-      const allCount = get().results.length;
-      request.label = `Result${allCount + 1}`;
-      void resultsForClass;
       get().clearBanners();
       set({ running: { className, experimentId: exp.id, phase: 'compiling', progress: 0, startedAt: Date.now() }, compilationLog: '', simulationLog: '', logHasErrors: false });
       try {
@@ -634,16 +972,19 @@ export const useStore = create<AppState>()((set, get) => {
         await api.startCompilation(wid, fmu.id);
         let comp = await api.getCompilation(wid, fmu.id);
         while (comp.status !== 'done' && comp.status !== 'cancelled') {
+          if (stale()) return;
           if (get().running?.cancelled) {
             set({ running: undefined });
             return;
           }
           await new Promise((r) => setTimeout(r, 150));
           comp = await api.getCompilation(wid, fmu.id);
+          if (stale()) return;
           set({ running: { ...get().running!, progress: Math.min(0.3, comp.progress * 0.3) } });
         }
         const compLog = await api.getCompilationLog(wid, fmu.id);
         const fmuInfo = await api.getModelExecutable(wid, fmu.id);
+        if (stale()) return;
         set({ compilationLog: typeof compLog === 'string' ? compLog : JSON.stringify(compLog) });
         if (fmuInfo.run_info.status !== 'successful') {
           const errors = fmuInfo.run_info.errors ?? ['Compilation failed'];
@@ -658,19 +999,25 @@ export const useStore = create<AppState>()((set, get) => {
           return;
         }
         // Simulation step (experiment execution)
+        request.label = await nextResultLabel(wid);
+        if (stale()) return;
         const created = await api.createExperiment(wid, request);
+        if (stale()) return;
         set({ running: { ...get().running!, phase: 'simulating', serverExperimentId: created.experiment_id, progress: 0.3 } });
         await api.startExecution(wid, created.experiment_id);
         let status = await api.getExecution(wid, created.experiment_id);
         while (status.status !== 'done' && status.status !== 'cancelled') {
+          if (stale()) return;
           if (get().running?.cancelled) {
             await api.cancelExecution(wid, created.experiment_id).catch(() => undefined);
           }
           await new Promise((r) => setTimeout(r, 300));
           status = await api.getExecution(wid, created.experiment_id);
+          if (stale()) return;
           set({ running: { ...get().running!, progress: 0.3 + 0.7 * status.progress } });
         }
         await get().loadResults();
+        if (stale()) return;
         const entry = get().results.find((r) => r.id === created.experiment_id);
         set({ running: undefined });
         if (entry) {
@@ -686,6 +1033,7 @@ export const useStore = create<AppState>()((set, get) => {
           }
         }
       } catch (e) {
+        if (stale()) return;
         set({ running: undefined, logHasErrors: true });
         for (const d of diagnosticsOf(e)) get().pushBanner({ severity: 'error', message: d.message, loc: d.loc, className, log: 'compilation' });
       }
@@ -721,6 +1069,7 @@ export const useStore = create<AppState>()((set, get) => {
         });
       }
       entries.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      if (get().workspaceId !== wid) return; // the workspace changed while loading: these results belong elsewhere
       const others = className ? get().results.filter((r) => r.className !== className) : [];
       set({ results: [...entries, ...others] });
       // make sure each class has an active result
@@ -764,32 +1113,63 @@ export const useStore = create<AppState>()((set, get) => {
         else delete active[cls];
       }
       const trajectories = Object.fromEntries(Object.entries(get().trajectories).filter(([k]) => !k.startsWith(`${id}/`)));
+      for (const k of [...failedTrajectories.keys()]) if (k.startsWith(`${id}/`)) failedTrajectories.delete(k);
       set({ results, activeResult: active, trajectories });
     },
 
-    async fetchTrajectories(resultId, caseId, variables) {
+    async ensureTrajectories(resultId, caseId, variables, opts) {
       const wid = get().workspaceId;
       const out: Record<string, number[]> = {};
       if (!wid) return out;
-      const missing: string[] = [];
-      for (const v of variables) {
-        const k = `${resultId}/${caseId}/${v}`;
-        const cached = get().trajectories[k];
-        if (cached) out[v] = cached;
-        else missing.push(v);
+      // `time` is always needed to evaluate a trajectory at the slider time.
+      const wanted = variables.includes('time') ? variables : [...variables, 'time'];
+      const waits: Promise<void>[] = [];
+      const fresh: string[] = [];
+      for (const v of wanted) {
+        const k = trajectoryKey(resultId, caseId, v);
+        if (get().trajectories[k]) continue;
+        const pending = pendingTrajectories.get(k);
+        if (pending) {
+          waits.push(pending);
+          continue;
+        }
+        const failedAt = failedTrajectories.get(k);
+        if (failedAt !== undefined) {
+          if (!opts?.retryFailed && Date.now() - failedAt < FAILED_TRAJECTORY_RETRY_MS) continue;
+          failedTrajectories.delete(k);
+        }
+        if (!fresh.includes(v)) fresh.push(v);
       }
-      if (missing.length) {
-        const names = missing.includes('time') ? missing : ['time', ...missing];
-        const data = await api.getCaseTrajectories(wid, resultId, caseId, { variable_names: names });
-        const patch: Record<string, number[]> = {};
-        names.forEach((v, i) => {
-          const arr = data[i] ?? [];
-          patch[`${resultId}/${caseId}/${v}`] = arr;
-          if (missing.includes(v)) out[v] = arr;
-        });
-        set({ trajectories: { ...get().trajectories, ...patch } });
+      if (fresh.length) {
+        const gk = `${resultId}/${caseId}`;
+        let batch = trajectoryBatches.get(gk);
+        if (!batch) {
+          const created = { variables: new Set<string>(), promise: Promise.resolve() };
+          // Flush in a microtask: every caller of the current render pass lands in this one request.
+          created.promise = new Promise<void>((resolve) => queueMicrotask(resolve)).then(() => {
+            trajectoryBatches.delete(gk);
+            return requestTrajectories(wid, resultId, caseId, [...created.variables]);
+          });
+          created.promise.catch(() => undefined); // every waiter handles the rejection itself
+          trajectoryBatches.set(gk, created);
+          batch = created;
+        }
+        for (const v of fresh) {
+          batch.variables.add(v);
+          pendingTrajectories.set(trajectoryKey(resultId, caseId, v), batch.promise);
+        }
+        waits.push(batch.promise);
+      }
+      await Promise.all(waits);
+      for (const v of variables) {
+        const cached = get().trajectories[trajectoryKey(resultId, caseId, v)];
+        if (cached) out[v] = cached;
       }
       return out;
+    },
+
+    fetchTrajectories(resultId, caseId, variables) {
+      return get().ensureTrajectories(resultId, caseId, variables, { retryFailed: true });
     },
 
     async fetchResultVariables(resultId) {
@@ -798,19 +1178,20 @@ export const useStore = create<AppState>()((set, get) => {
       const cached = get().resultVariables[resultId];
       if (cached) return cached;
       const res = await api.getExperimentVariables(wid, resultId);
-      set({ resultVariables: { ...get().resultVariables, [resultId]: res.variables } });
+      if (get().workspaceId === wid) set({ resultVariables: { ...get().resultVariables, [resultId]: res.variables } });
       return res.variables;
     },
 
-    valueAt(variable, resultId, caseId) {
+    valueAt(variable, resultId, caseId, opts) {
       const r = resultId ? get().results.find((x) => x.id === resultId) : get().getActiveResult();
       if (!r) return undefined;
       const cid = caseId ?? r.cases[Math.min(get().caseIndex, Math.max(0, r.cases.length - 1))]?.id;
       if (!cid) return undefined;
-      const values = get().trajectories[`${r.id}/${cid}/${variable}`];
-      const time = get().trajectories[`${r.id}/${cid}/time`];
+      const values = get().trajectories[trajectoryKey(r.id, cid, variable)];
+      const time = get().trajectories[trajectoryKey(r.id, cid, 'time')];
       if (!values || !time) {
-        void get().fetchTrajectories(r.id, cid, [variable]).catch(() => undefined);
+        // Pure read unless asked otherwise; the ensure call is de-duplicated and batched, so render paths may call this per row.
+        if (opts?.fetch !== false) void get().ensureTrajectories(r.id, cid, [variable]).catch(() => undefined);
         return undefined;
       }
       if (values.length === 1) return values[0];
@@ -869,7 +1250,7 @@ export const useStore = create<AppState>()((set, get) => {
       if (!cid) return;
       try {
         const log = await api.getCaseLog(wid, resultId, cid);
-        set({ simulationLog: log.log });
+        if (get().workspaceId === wid) set({ simulationLog: log.log });
       } catch {
         /* ignore */
       }

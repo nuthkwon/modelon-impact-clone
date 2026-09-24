@@ -241,3 +241,82 @@ describe('ClassRegistry.resolveType', () => {
     expect(registry.resolveType('U.MyInit')?.enumerationLiterals).toEqual(['NoInit', 'SteadyState', 'InitialState', 'InitialOutput']);
   });
 });
+
+describe('ClassRegistry re-indexing and pathological lookups', () => {
+  it('keeps within-declared children when package.mo is re-added (finding: childrenMap loss)', () => {
+    const registry = makeRegistry();
+    registry.addLibrary({ id: 'lib', name: 'MyLib', readOnly: false });
+    registry.addFile('lib', 'MyLib/package.mo', 'package MyLib\n  model Inline end Inline;\nend MyLib;');
+    registry.addFile('lib', 'MyLib/Circuit.mo', 'within MyLib;\nmodel Circuit end Circuit;');
+    registry.addFile('lib', 'MyLib/Other.mo', 'within MyLib;\nmodel Other\n  Circuit c;\nend Other;');
+    expect(registry.children('MyLib').map((c) => c.fullName)).toEqual(['MyLib.Inline', 'MyLib.Circuit', 'MyLib.Other']);
+
+    // The user saves package.mo (any edit): the within-declared siblings must survive.
+    expect(registry.addFile('lib', 'MyLib/package.mo', 'package MyLib "edited"\n  model Inline end Inline;\nend MyLib;')).toEqual([]);
+    expect(registry.children('MyLib').map((c) => c.fullName)).toEqual(['MyLib.Inline', 'MyLib.Circuit', 'MyLib.Other']);
+    expect(registry.has('MyLib.Circuit')).toBe(true);
+    expect(registry.lookup('Circuit', 'MyLib.Other')?.fullName).toBe('MyLib.Circuit');
+    expect(registry.lookup('MyLib.Circuit')?.fullName).toBe('MyLib.Circuit');
+
+    // Removing the parent's file for good drops nothing that other files declare, and
+    // re-adding it restores the tree; a nested class that vanished is really gone.
+    registry.removeFile('lib', 'MyLib/package.mo');
+    expect(registry.children('MyLib')).toEqual([]);
+    expect(registry.has('MyLib.Inline')).toBe(false);
+    registry.addFile('lib', 'MyLib/package.mo', 'package MyLib\nend MyLib;');
+    expect(registry.children('MyLib').map((c) => c.fullName)).toEqual(['MyLib.Circuit', 'MyLib.Other']);
+    expect(registry.lookup('Inline', 'MyLib.Other')).toBeUndefined();
+  });
+
+  it('terminates when an extends clause routes through the class itself (finding: infinite recursion)', () => {
+    const registry = makeRegistry();
+    registry.addLibrary({ id: 'lib', name: 'MyLib', readOnly: false });
+    registry.addFile('lib', 'MyLib/package.mo', 'package MyLib\n  extends MyLib.Icons.Package;\n  model Tank\n    Real h;\n  end Tank;\nend MyLib;');
+    expect(registry.lookup('Real', 'MyLib.Tank')?.builtin).toBe(true);
+    expect(registry.baseClasses('MyLib')).toEqual([]);
+    expect(registry.unresolvedBases('MyLib')).toEqual(['MyLib.Icons.Package']);
+    expect(registry.inheritanceChain('MyLib').map((c) => c.fullName)).toEqual(['MyLib']);
+    expect(registry.lookup('Tank', 'MyLib')?.fullName).toBe('MyLib.Tank');
+
+    registry.addFile('lib', 'M.mo', 'model M\n  extends M.X;\n  Real x;\nend M;');
+    expect(registry.lookup('Real', 'M')?.builtin).toBe(true);
+    expect(registry.unresolvedBases('M')).toEqual(['M.X']);
+
+    // Mutually recursive bases and an import that leads back into the class under search.
+    registry.addFile('lib', 'Cyc.mo', 'package Cyc\n  model A extends B; end A;\n  model B extends A; end B;\n  package P\n    import Cyc.P.*;\n    extends P.Q;\n  end P;\nend Cyc;');
+    expect(registry.lookup('Nope', 'Cyc.A')).toBeUndefined();
+    expect(registry.lookup('Nope', 'Cyc.P')).toBeUndefined();
+    expect(registry.baseClasses('Cyc.A').map((c) => c.fullName)).toEqual(['Cyc.B']);
+
+    // Once the missing package exists the same text resolves.
+    registry.addFile('lib', 'MyLib/Icons.mo', 'within MyLib;\npackage Icons\n  partial package Package end Package;\nend Icons;');
+    expect(registry.baseClasses('MyLib').map((c) => c.fullName)).toEqual(['MyLib.Icons.Package']);
+    expect(registry.unresolvedBases('MyLib')).toEqual([]);
+  });
+
+  it("resolves global '.Name' references in extends and short classes (finding: lookupInClass)", () => {
+    const registry = makeRegistry();
+    registry.addFile('lib', 'P.mo', `package P
+      model Base
+        model Inner end Inner;
+      end Base;
+      model D
+        extends .P.Base;
+        Inner i;
+      end D;
+      type V = .P.Base;
+      model E
+        V v;
+      end E;
+    end P;`);
+    expect(registry.baseClasses('P.D').map((c) => c.fullName)).toEqual(['P.Base']);
+    expect(registry.unresolvedBases('P.D')).toEqual([]);
+    expect(registry.inheritanceChain('P.D').map((c) => c.fullName)).toEqual(['P.Base', 'P.D']);
+    expect(registry.lookup('Inner', 'P.D')?.fullName).toBe('P.Base.Inner');
+    expect(registry.lookup('.P.Base.Inner', 'P.E')?.fullName).toBe('P.Base.Inner');
+    expect(registry.resolveType('P.V')?.base.fullName).toBe('P.Base');
+    expect(registry.resolveType('P.V')?.chain.map((c) => c.fullName)).toEqual(['P.V', 'P.Base']);
+    // A global name never resolves relative to the scope.
+    expect(registry.lookup('.Base', 'P.D')).toBeUndefined();
+  });
+});

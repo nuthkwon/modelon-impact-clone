@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { ClassRegistry } from '../registry.js';
 import { MINI, makeRegistry } from './fixtures.js';
 
 const lineOf = (text: string, needle: string) => text.split('\n').findIndex((l) => l.includes(needle)) + 1;
@@ -132,5 +133,53 @@ describe('getVariables', () => {
     expect(vars.map((v) => v.name)).toEqual(['placedData.b']);
     expect(vars[0]).toMatchObject({ typeName: 'Real', unit: 'm', inConnector: false, variability: 'continuous', description: 'Field b' });
     expect(getVariables(registry, 'Circuits.RC').map((v) => v.name)).toEqual(['pin.v', 'pin.i', 'hidden']);
+  });
+});
+
+describe('getParameters with record-constructor bindings on the owner', () => {
+  const REC = `package Rec
+  record Data
+    Real a = 1 "Field a";
+    Real b = 2 "Field b";
+  end Data;
+  model M
+    parameter Data data;
+  end M;
+  model Owner
+    M m1(data = Data(a=3));
+    M m2(data(a=4));
+    M m3(data(b=6) = Data(a=5));
+  end Owner;
+  model Sub
+    extends Owner(m1(data = Data(a=7)), m2(data = Data(b=8)));
+  end Sub;
+end Rec;`;
+  const registry = new ClassRegistry();
+  registry.addLibrary({ id: 'Rec', name: 'Rec', readOnly: false });
+  expect(registry.addFile('Rec', 'Rec.mo', REC)).toEqual([]);
+  const params = (owner: string, component: string) =>
+    Object.fromEntries(getParameters(registry, 'Rec.M', { ownerClassName: owner, componentName: component }).map((p) => [p.name, p]));
+
+  it('expands `m(data = Data(a=3))` like `m(data(a=3))`', () => {
+    const m1 = params('Rec.Owner', 'm1');
+    expect(m1['data.a']).toMatchObject({ valueText: '3', evaluated: 3, defaultText: '1' });
+    expect(m1['data.b']).toMatchObject({ evaluated: 2 });
+    expect(m1['data.b'].valueText).toBeUndefined();
+    const m2 = params('Rec.Owner', 'm2');
+    expect(m2['data.a']).toMatchObject({ valueText: '4', evaluated: 4 });
+  });
+
+  it('lets nested field modifiers coexist with a record constructor', () => {
+    const m3 = params('Rec.Owner', 'm3');
+    expect(m3['data.a']).toMatchObject({ valueText: '5', evaluated: 5 });
+    expect(m3['data.b']).toMatchObject({ valueText: '6', evaluated: 6 });
+  });
+
+  it('applies record constructors from the extends path with the usual priority', () => {
+    const m1 = params('Rec.Sub', 'm1');
+    expect(m1['data.a']).toMatchObject({ valueText: '7', evaluated: 7 });
+    const m2 = params('Rec.Sub', 'm2');
+    expect(m2['data.a']).toMatchObject({ valueText: '4', evaluated: 4 });
+    expect(m2['data.b']).toMatchObject({ valueText: '8', evaluated: 8 });
   });
 });

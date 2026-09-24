@@ -20,6 +20,7 @@ import type { CaseDto, ExperimentDto, ModelExecutableDto, Project, ProjectConten
 import { caseIndex, newContentId, newProjectId, newWorkspaceId } from './ids.js';
 import { copyDirContents, dirSize, ensureDir, exists, isDirectory, isFile, isSafeRelative, listDir, listFilesRecursive, listSubdirs, readJson, readText, removeFile, removeRecursive, writeJsonAtomic, writeTextAtomic } from './fsutil.js';
 import { notFound } from './errors.js';
+import { isValidId } from './validate.js';
 
 export const MODELICA_LIBRARY_ID = 'modelica';
 export const MODELICA_LIBRARY_NAME = 'Modelica';
@@ -142,17 +143,26 @@ export class Storage {
   // Workspaces
   // ---------------------------------------------------------------------------------------
 
+  /** Ids of the workspace directories on disk (well-formed ones only). */
+  listWorkspaceIds(): string[] {
+    return listSubdirs(this.workspacesDir).filter(isValidId);
+  }
+
   listWorkspaces(): Workspace[] {
     const out: Workspace[] = [];
-    for (const wid of listSubdirs(this.workspacesDir)) {
+    for (const wid of this.listWorkspaceIds()) {
       const ws = this.getWorkspace(wid);
       if (ws) out.push(ws);
     }
     return out.sort((a, b) => a.definition.createdAt.localeCompare(b.definition.createdAt));
   }
 
+  // Every id is checked against the strict id pattern (no `.`, `/`, `\`) before it is joined
+  // into a path, so `ws_x/.`-style aliases of a directory never reach the filesystem or the
+  // caches/job maps keyed by the raw id.
+
   getWorkspace(wid: string): Workspace | undefined {
-    if (!isSafeRelative(wid)) return undefined;
+    if (!isValidId(wid)) return undefined;
     const definition = readJson<WorkspaceDefinition>(this.workspaceFile(wid));
     if (!definition) return undefined;
     return { id: wid, definition, sizeInfo: { total: dirSize(this.workspaceDir(wid)) } };
@@ -262,7 +272,7 @@ export class Storage {
 
   /** Reads a project and reconciles its MODELICA content list with the files on disk. */
   getProject(wid: string, pid: string): Project | undefined {
-    if (!isSafeRelative(pid)) return undefined;
+    if (!isValidId(wid) || !isValidId(pid)) return undefined;
     const stored = readJson<StoredProject>(this.projectFile(wid, pid));
     if (!stored) return undefined;
     const project: Project = { id: pid, definition: stored.definition, projectType: stored.projectType ?? 'LOCAL' };
@@ -362,6 +372,7 @@ export class Storage {
 
   listExperiments(wid: string): ExperimentDto[] {
     const out: ExperimentDto[] = [];
+    if (!isValidId(wid)) return out;
     for (const eid of listSubdirs(this.experimentsDir(wid))) {
       const e = this.getExperiment(wid, eid);
       if (e) out.push(e);
@@ -370,7 +381,7 @@ export class Storage {
   }
 
   getExperiment(wid: string, eid: string): ExperimentDto | undefined {
-    if (!isSafeRelative(eid)) return undefined;
+    if (!isValidId(wid) || !isValidId(eid)) return undefined;
     return readJson<ExperimentDto>(this.experimentFile(wid, eid));
   }
 
@@ -392,6 +403,7 @@ export class Storage {
 
   listCases(wid: string, eid: string): CaseDto[] {
     const out: CaseDto[] = [];
+    if (!isValidId(wid) || !isValidId(eid)) return out;
     for (const entry of listDir(this.casesDir(wid, eid))) {
       if (!entry.isFile() || !entry.name.endsWith('.json') || entry.name.endsWith('.result.json')) continue;
       const c = readJson<CaseDto>(path.join(this.casesDir(wid, eid), entry.name));
@@ -401,7 +413,7 @@ export class Storage {
   }
 
   getCase(wid: string, eid: string, cid: string): CaseDto | undefined {
-    if (!isSafeRelative(cid)) return undefined;
+    if (!isValidId(wid) || !isValidId(eid) || !isValidId(cid)) return undefined;
     return readJson<CaseDto>(this.caseFile(wid, eid, cid));
   }
 
@@ -416,7 +428,7 @@ export class Storage {
   }
 
   readCaseResult(wid: string, eid: string, cid: string): SimulationResult | undefined {
-    if (!isSafeRelative(cid)) return undefined;
+    if (!isValidId(wid) || !isValidId(eid) || !isValidId(cid)) return undefined;
     return readJson<SimulationResult>(this.caseResultFile(wid, eid, cid));
   }
 
@@ -425,8 +437,15 @@ export class Storage {
   }
 
   readCaseLog(wid: string, eid: string, cid: string): string {
-    if (!isSafeRelative(cid)) return '';
+    if (!isValidId(wid) || !isValidId(eid) || !isValidId(cid)) return '';
     return readText(this.caseLogFile(wid, eid, cid)) ?? '';
+  }
+
+  /** Removes a case's result and log files (before a re-run, so a failed run cannot show stale data). */
+  clearCaseOutputs(wid: string, eid: string, cid: string): void {
+    if (!isValidId(wid) || !isValidId(eid) || !isValidId(cid)) return;
+    removeFile(this.caseResultFile(wid, eid, cid));
+    removeFile(this.caseLogFile(wid, eid, cid));
   }
 
   writeCaseLog(wid: string, eid: string, cid: string, log: string): void {
@@ -439,6 +458,7 @@ export class Storage {
 
   listExecutables(wid: string): ModelExecutableDto[] {
     const out: ModelExecutableDto[] = [];
+    if (!isValidId(wid)) return out;
     for (const entry of listDir(this.executablesDir(wid))) {
       if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
       const e = readJson<ModelExecutableDto>(path.join(this.executablesDir(wid), entry.name));
@@ -448,7 +468,7 @@ export class Storage {
   }
 
   getExecutable(wid: string, fid: string): ModelExecutableDto | undefined {
-    if (!isSafeRelative(fid)) return undefined;
+    if (!isValidId(wid) || !isValidId(fid)) return undefined;
     return readJson<ModelExecutableDto>(this.executableFile(wid, fid));
   }
 
@@ -470,7 +490,7 @@ export class Storage {
   }
 
   readExecutableLog(wid: string, fid: string): string {
-    if (!isSafeRelative(fid)) return '';
+    if (!isValidId(wid) || !isValidId(fid)) return '';
     return readText(this.executableLogFile(wid, fid)) ?? '';
   }
 

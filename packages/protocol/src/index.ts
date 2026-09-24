@@ -245,6 +245,8 @@ export interface ExperimentDto {
     successful: number;
     cancelled: number;
     not_started: number;
+    /** Set by the server when it changed the status itself, e.g. after a restart interrupted the run. */
+    message?: string;
   };
   /** Model class name for quick listing. */
   className: string;
@@ -292,7 +294,8 @@ export interface ModelExecutableDto {
   id: string;
   input: ModelicaModelSpec;
   run_info: {
-    status: 'successful' | 'failed' | 'cancelled' | 'not_started';
+    /** `running` is persisted while a compilation is in progress so a restart can detect it. */
+    status: 'successful' | 'failed' | 'cancelled' | 'not_started' | 'running';
     datetime_started?: string;
     datetime_finished?: string;
     errors?: string[];

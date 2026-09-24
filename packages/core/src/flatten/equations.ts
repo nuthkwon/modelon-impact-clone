@@ -1,12 +1,13 @@
 /**
  * Equation flattening: equalities, if-equations (constant conditions select a branch,
  * variable conditions pair the branch equations position by position), when-clauses
- * (`reinit` and discrete assignments), initial equations, and the `assert`/`terminate`
- * statements (dropped with a diagnostic). `connect` statements are collected on the instance
- * and expanded later by `connections.ts`.
+ * (`reinit` and discrete assignments; `elsewhen` branches get edge-priority through hidden
+ * Boolean condition variables), initial equations, and the `assert`/`terminate` statements
+ * (dropped with a diagnostic). `connect` statements are collected on the instance and
+ * expanded later by `connections.ts`.
  */
-import { E, type Equation, type Expr } from '../ast.js';
-import { flatRef, type FlatEquation, type FlatEquationKind, type FlatWhenClause } from '../flat.js';
+import { E, type Equation, type Expr, type SourceLoc } from '../ast.js';
+import { flatRef, isFlatRef, type FlatEquation, type FlatEquationKind, type FlatVariable, type FlatWhenClause } from '../flat.js';
 import { printExpr } from '../parser/printer.js';
 import { tryEvaluateConstant } from './evaluate.js';
 import { paramEnv } from './parameters.js';
@@ -14,6 +15,7 @@ import { flattenExpr, resolveVariable } from './scope.js';
 import { diag, error, fileOf, isParamLike, originOf, pathOf, type ClassInstance, type ConnectStatement, type Ctx, type Scope } from './types.js';
 
 export interface EquationTargets {
+  variables: FlatVariable[];
   equations: FlatEquation[];
   initialEquations: FlatEquation[];
   whenClauses: FlatWhenClause[];
@@ -21,7 +23,7 @@ export interface EquationTargets {
 
 /** Flattens the equations of `inst` and, depth-first, of its sub-instances. */
 export function flattenInstanceEquations(ctx: Ctx, inst: ClassInstance, model: EquationTargets): void {
-  for (const se of inst.equations) flattenEquation(ctx, se.eq, se.scope, 'equation', model.equations, model.whenClauses, inst.connects);
+  for (const se of inst.equations) flattenEquation(ctx, se.eq, se.scope, 'equation', model.equations, model, inst.connects);
   for (const se of inst.initialEquations) flattenEquation(ctx, se.eq, se.scope, 'initial', model.initialEquations, undefined, undefined);
   for (const name of inst.order) {
     const c = inst.components.get(name);
@@ -35,7 +37,8 @@ function flattenEquation(
   scope: Scope,
   kind: 'equation' | 'initial',
   out: FlatEquation[],
-  whens: FlatWhenClause[] | undefined,
+  /** The model to receive when-clauses (and their helper variables); undefined where when-equations are not allowed. */
+  whens: EquationTargets | undefined,
   connects: ConnectStatement[] | undefined,
 ): void {
   const file = fileOf(ctx, scope.cls);
@@ -106,7 +109,7 @@ function flattenIfEquation(
   scope: Scope,
   kind: 'equation' | 'initial',
   out: FlatEquation[],
-  whens: FlatWhenClause[] | undefined,
+  whens: EquationTargets | undefined,
   connects: ConnectStatement[] | undefined,
 ): void {
   const env = paramEnv(ctx);
@@ -157,21 +160,58 @@ function flattenIfEquation(
   }
 }
 
-function flattenWhen(ctx: Ctx, eq: Equation & { kind: 'when' }, scope: Scope, whens: FlatWhenClause[]): void {
+/**
+ * `when c_0 then … elsewhen c_1 then … end when`: the first branch whose condition *becomes*
+ * true is activated (Modelica §8.3.5: `if edge(b_0) then … elseif edge(b_1) then …` with
+ * `b_j = c_j`). Branch k therefore fires on the rising edge of `c_k` unless an earlier
+ * condition rises at the same instant: `c_k and not edge(b_0) and … and not edge(b_{k-1})`.
+ * The solver observes edges of variables only, so every non-final condition that is not
+ * already a Boolean variable gets a hidden Boolean helper `$whenConditionN = c_j`.
+ */
+function flattenWhen(ctx: Ctx, eq: Equation & { kind: 'when' }, scope: Scope, model: EquationTargets): void {
   const origin = originOf(scope);
   const conds = eq.branches.map((b) => flattenExpr(ctx, b.cond, scope));
+  const edgeVars: Expr[] = [];
   for (let k = 0; k < eq.branches.length; k++) {
     let cond = conds[k];
-    if (k > 0) {
-      // `elsewhen c_k` fires only when none of the earlier conditions hold.
-      let earlier = conds[0];
-      for (let j = 1; j < k; j++) earlier = E.bin('or', earlier, conds[j]);
-      cond = E.bin('and', cond, { kind: 'unary', op: 'not', operand: earlier });
-    }
+    for (const b of edgeVars) cond = E.bin('and', cond, { kind: 'unary', op: 'not', operand: E.call('edge', [b]) });
     const equations: FlatEquation[] = [];
     for (const sub of eq.branches[k].equations) flattenWhenBody(ctx, sub, scope, equations);
-    whens.push({ cond, equations, origin });
+    model.whenClauses.push({ cond, equations, origin });
+    if (k < eq.branches.length - 1) {
+      const b = edgeVariableFor(ctx, conds[k], scope, eq.branches[k].cond.loc ?? eq.loc, model);
+      if (b) edgeVars.push(b);
+    }
   }
+}
+
+/** A Boolean variable whose rising edge is the activation of `cond`: the variable itself for a Boolean variable, a hidden helper otherwise; undefined for a constant condition (it never has an edge). */
+function edgeVariableFor(ctx: Ctx, cond: Expr, scope: Scope, loc: SourceLoc | undefined, model: EquationTargets): Expr | undefined {
+  if (isFlatRef(cond)) {
+    const v = ctx.varsByPath.get(cond.parts[0].name);
+    if (v && v.type === 'Boolean' && !isParamLike(v)) return flatRef(v.path);
+  }
+  if (tryEvaluateConstant(cond, paramEnv(ctx)) !== undefined) return undefined;
+  const instPath = scope.inst?.path ?? '';
+  const name = `${instPath ? `${instPath}.` : ''}$whenCondition${++ctx.whenConditionHelpers}`;
+  const file = fileOf(ctx, scope.cls);
+  model.variables.push({
+    name,
+    type: 'Boolean',
+    variability: 'discrete',
+    causality: 'none',
+    flow: false,
+    typeName: 'Boolean',
+    attributes: { start: false },
+    description: `when-condition ${printExpr(cond)} (hidden helper for elsewhen priority)`,
+    protected: true,
+    componentPath: instPath ? instPath.split('.') : [],
+    declaredIn: scope.cls.fullName,
+    loc,
+    file,
+  });
+  model.equations.push({ kind: 'equation', left: flatRef(name), right: cond, origin: `${originOf(scope)} (when-condition helper)`, loc, file });
+  return flatRef(name);
 }
 
 function flattenWhenBody(ctx: Ctx, eq: Equation, scope: Scope, equations: FlatEquation[]): void {

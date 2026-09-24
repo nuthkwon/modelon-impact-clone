@@ -12,7 +12,7 @@ import type { CompileRequest, ItemsResponse, ModelExecutableDto, ModelicaModelSp
 import type { AppContext } from '../context.js';
 import { notFound } from '../errors.js';
 import { newExecutableId } from '../ids.js';
-import { optionalEnum, optionalObject, requireClassName, requireObject } from '../validate.js';
+import { optionalEnum, optionalObject, requireClassName, requireObject, validateIdParams } from '../validate.js';
 
 export function parseModelSpec(value: unknown, what: string): ModelicaModelSpec {
   const spec = requireObject(value, what);
@@ -34,6 +34,7 @@ export function parseModelSpec(value: unknown, what: string): ModelicaModelSpec 
 
 export function modelExecutableRoutes(ctx: AppContext): Router {
   const router = Router();
+  validateIdParams(router);
 
   router.get('/:wid/model-executables', (req, res) => {
     ctx.storage.requireWorkspace(req.params.wid);

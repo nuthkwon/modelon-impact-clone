@@ -25,6 +25,12 @@ export interface WorkspaceSlice {
   registryVersion: number;
   /** Parse diagnostics per file key (`libraryId::path`). */
   fileDiagnostics: Record<string, Diagnostic[]>;
+  /**
+   * Server version stamp per file key (`ClassSourceDto.version`), learned from every save/create
+   * response. Unknown for a file until its first write, which then validates against the server first.
+   * Every source PUT sends it so concurrent clients get a 409 instead of silently overwriting each other.
+   */
+  fileVersions: Record<string, number>;
   loading: boolean;
   loadError?: string;
 
@@ -43,6 +49,8 @@ export interface WorkspaceSlice {
 // ---------------------------------------------------------------------------
 
 export interface HistoryEntry {
+  /** Workspace the edit was made in; entries of another workspace are never replayed. */
+  workspaceId: string;
   libraryId: string;
   path: string;
   before: string;
@@ -213,6 +221,8 @@ export interface SimulationSlice {
   sliderPlaying: boolean;
   /** Selected case index for multi-case results. */
   caseIndex: number;
+  /** Highest `ResultN` number handed out in this workspace (persisted), so names stay unique after deletions. */
+  resultCounter: number;
 
   simulate(kind?: 'dynamic' | 'steady state' | 'compile'): Promise<void>;
   cancelSimulation(): Promise<void>;
@@ -222,10 +232,22 @@ export interface SimulationSlice {
   setActiveResult(className: string, id: string): void;
   renameResult(id: string, name: string): Promise<void>;
   deleteResult(id: string): Promise<void>;
+  /**
+   * Loads the trajectories of `variables` (and `time`) that are not cached yet. Requests are
+   * de-duplicated with every other in-flight request for the same result/case/variable and batched
+   * per result/case within a microtask, so calling this once per row costs one request per render.
+   * Variables whose last request failed are skipped for a while unless `retryFailed` is set.
+   */
+  ensureTrajectories(resultId: string, caseId: string, variables: string[], opts?: { retryFailed?: boolean }): Promise<Record<string, number[]>>;
+  /** Same as `ensureTrajectories` with `retryFailed`; kept for existing callers. Resolves to the requested variables' values. */
   fetchTrajectories(resultId: string, caseId: string, variables: string[]): Promise<Record<string, number[]>>;
   fetchResultVariables(resultId: string): Promise<string[]>;
-  /** Value of `variable` at the slider time for the active result/case, or undefined if not loaded (triggers a fetch). */
-  valueAt(variable: string, resultId?: string, caseId?: string): number | undefined;
+  /**
+   * Value of `variable` at the slider time for the active (or given) result/case, or undefined when
+   * the trajectory is not loaded. Unless `fetch: false`, a missing trajectory is requested through
+   * `ensureTrajectories` (de-duplicated and batched, so it is safe to call from render paths).
+   */
+  valueAt(variable: string, resultId?: string, caseId?: string, opts?: { fetch?: boolean }): number | undefined;
   showLog(tab: 'compilation' | 'simulation', open?: boolean): void;
   setLogOpen(open: boolean): void;
   pushBanner(b: Omit<Banner, 'id'>): void;

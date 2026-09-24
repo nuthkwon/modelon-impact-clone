@@ -6,7 +6,7 @@ import type { ItemsResponse, LibraryBundleDto, Project, Workspace } from '@impac
 import type { AppContext } from '../context.js';
 import { badRequest, notFound } from '../errors.js';
 import type { LibraryEntry } from '../registry-cache.js';
-import { optionalString, requireObject, requireString } from '../validate.js';
+import { optionalString, requireObject, requireString, validateIdParams } from '../validate.js';
 
 function bundleOf(lib: LibraryEntry): LibraryBundleDto {
   return {
@@ -20,6 +20,7 @@ function bundleOf(lib: LibraryEntry): LibraryBundleDto {
 
 export function workspaceRoutes(ctx: AppContext): Router {
   const router = Router();
+  validateIdParams(router);
 
   router.get('/', (_req, res) => {
     const body: ItemsResponse<Workspace> = { data: { items: ctx.storage.listWorkspaces() } };

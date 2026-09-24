@@ -1,5 +1,7 @@
 /**
- * Server entry point: `PORT` (default 8080), `DATA_DIR`, `LIBRARIES_DIR` environment variables.
+ * Server entry point. Environment: `PORT` (default 8080), `DATA_DIR`, `LIBRARIES_DIR`,
+ * `MAX_CASES` (sweep expansion cap, default 1000), `CORS_ORIGIN` (comma-separated allowed
+ * origins; unset = same-origin only).
  */
 import { createApp } from './app.js';
 
@@ -13,6 +15,7 @@ const server = app.listen(port, () => {
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.on(signal, () => {
+    app.context.jobs.shutdown();
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(0), 1000).unref();
   });

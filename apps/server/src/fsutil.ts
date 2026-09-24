@@ -138,9 +138,14 @@ export function toPosix(p: string): string {
   return p.split(path.sep).join('/').replace(/^\.\//, '');
 }
 
-/** Rejects paths that would escape their root (`..`, absolute). */
+/**
+ * Rejects paths that would escape their root (`..`, absolute, empty segments). One trailing
+ * separator is allowed: directory libraries/packages are addressed as `Examples/`.
+ */
 export function isSafeRelative(p: string): boolean {
   if (!p || path.isAbsolute(p)) return false;
-  const parts = p.split(/[\\/]/);
+  const trimmed = p.replace(/[\\/]$/, '');
+  if (!trimmed) return false;
+  const parts = trimmed.split(/[\\/]/);
   return parts.every((s) => s !== '..' && s !== '');
 }

@@ -513,3 +513,32 @@ describe('value readers', () => {
     expect(readColor(E.array([E.num(1), E.num(2), E.ref('b')]))).toBeUndefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Dotted modifier names
+// ---------------------------------------------------------------------------
+
+describe('dotted annotation modifiers', () => {
+  it('reads dotted names as nested records', () => {
+    const annotation = ann(rec('Placement', rec('transformation', val('extent', extent(-10, -10, 10, 10))), val('transformation.rotation', E.num(90))));
+    expect(parsePlacement(annotation)).toMatchObject({ transformation: { extent: [[-10, -10], [10, 10]], rotation: 90 } });
+    const icon = ann(rec('Icon', rec('coordinateSystem', val('extent', extent(-100, -100, 100, 100))), val('coordinateSystem.grid', E.array([E.num(1), E.num(1)]))));
+    expect(parseGraphicsLayer(icon, 'Icon')?.coordinateSystem.grid).toEqual([1, 1]);
+  });
+
+  it('never mutates the annotation AST when expanding dotted names, however often it is read', () => {
+    const transformation = rec('transformation', val('extent', extent(-10, -10, 10, 10)));
+    const annotation = ann(rec('Placement', transformation, val('transformation.rotation', E.num(90))));
+    const snapshot = JSON.stringify(annotation);
+    for (let i = 0; i < 3; i++) expect(parsePlacement(annotation)?.transformation.rotation).toBe(90);
+    expect(transformation.modification.mods.map((m) => m.name)).toEqual(['extent']);
+    expect(JSON.stringify(annotation)).toBe(snapshot);
+
+    const coordinateSystem = rec('coordinateSystem', val('extent', extent(-100, -100, 100, 100)));
+    const icon = ann(rec('Icon', coordinateSystem, val('coordinateSystem.grid', E.array([E.num(1), E.num(1)]))));
+    const iconSnapshot = JSON.stringify(icon);
+    for (let i = 0; i < 2; i++) expect(parseGraphicsLayer(icon, 'Icon')?.coordinateSystem.grid).toEqual([1, 1]);
+    expect(coordinateSystem.modification.mods.map((m) => m.name)).toEqual(['extent']);
+    expect(JSON.stringify(icon)).toBe(iconSnapshot);
+  });
+});

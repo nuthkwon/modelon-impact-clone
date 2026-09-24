@@ -9,6 +9,19 @@ import type { Mode, View } from '../store/types';
 const MODES: Mode[] = ['model', 'experiment', 'results'];
 const VIEWS: View[] = ['diagram', 'code'];
 
+/**
+ * Decodes one percent-encoded path segment (e.g. the workspace id of `/workspaces/:wid`). A malformed
+ * sequence such as `%E0` or a truncated `%2` makes `decodeURIComponent` throw; the raw segment is used
+ * instead so the page renders its "could not be loaded" state rather than an empty document.
+ */
+export function decodePathSegment(segment: string): string {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
+}
+
 export function readWorkspaceQuery(search = window.location.search): { className?: string; mode?: Mode; view?: View } {
   const q = new URLSearchParams(search);
   const cls = q.get('class') ?? undefined;
