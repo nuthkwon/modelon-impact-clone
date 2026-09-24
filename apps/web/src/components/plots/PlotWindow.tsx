@@ -312,7 +312,8 @@ export function PlotWindowView({ className, plot, canvasRef }: PlotWindowViewPro
   // ------------------------------------------------------------------ chart inputs
   const isTime = plot.xVariable === 'time';
   const xUnit = isTime ? 's' : unitOf(meta, plot.xVariable);
-  const xAxisLabel = xUnit ? `${plot.xVariable} [${unitLabel(xUnit)}]` : plot.xVariable;
+  const xName = isTime ? 'Time' : plot.xVariable;
+  const xAxisLabel = xUnit ? `${xName} [${unitLabel(xUnit)}]` : xName;
   const series = useMemo<ChartSeries[]>(
     () =>
       resolved.map((s) => {
