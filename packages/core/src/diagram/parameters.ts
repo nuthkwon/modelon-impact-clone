@@ -14,7 +14,7 @@ import type { Expr, SourceLoc } from '../ast.js';
 import type { ParameterInfo, VariableInfo } from '../diagram.js';
 import type { Causality } from '../flat.js';
 import { tryEvaluateConstant, type ConstValue, type EvalEnv } from '../flatten/evaluate.js';
-import { evalBoolean, evalString } from '../graphics/annotations.js';
+import { evalBoolean, evalString, parsePlacement } from '../graphics/annotations.js';
 import { printExpr } from '../parser/printer.js';
 import type { ClassRegistry } from '../registry.js';
 import { cacheFor, type RegistryCache } from './cache.js';
@@ -83,9 +83,11 @@ function isScalarKind(t: ComponentType): boolean {
 function collectRawParameters(registry: ClassRegistry, cache: RegistryCache, className: string): RawParameter[] {
   return cache.memo('rawParameters', className, () => {
     const out: RawParameter[] = [];
+    // Every field of a record is parameter-like data, whether or not it carries the `parameter` prefix.
+    const isRecord = registry.get(className)?.def.restriction === 'record';
     for (const ic of collectComponents(registry, cache, className)) {
       const { decl, declaringClass } = ic;
-      if (!(decl.prefixes.parameter || decl.prefixes.constant) || decl.prefixes.protected) continue;
+      if (!(isRecord || decl.prefixes.parameter || decl.prefixes.constant) || decl.prefixes.protected) continue;
       const t = resolveTypeName(registry, cache, decl.typeName, declaringClass.fullName);
       if (t.kind === 'connector' || t.kind === 'class') continue;
       const declMods = flattenMods(decl.modification?.mods);
@@ -365,6 +367,8 @@ function computeVariables(registry: ClassRegistry, cache: RegistryCache, classNa
     const { decl, declaringClass } = ic;
     if (decl.prefixes.parameter || decl.prefixes.constant) continue;
     const t = resolveTypeName(registry, cache, decl.typeName, declaringClass.fullName);
+    // A placed declaration of unknown type is a (broken) component, not a variable.
+    if (t.kind === 'unresolved' && parsePlacement(decl.annotation)) continue;
     const attrs = mergeMods(mergeMods(typeAttrsOf(t), flattenMods(decl.modification?.mods)), ic.sub);
     if (isScalarKind(t)) {
       out.push(variableInfo(decl.name, t, decl.description, attrs, false, causalityOf(decl, t), decl.prefixes.flow || t.flow, decl.prefixes.discrete));

@@ -183,7 +183,7 @@ describe('buildDiagramView', () => {
     expect(derived.components.find((c) => c.name === 'resistor')!.parameters.find((p) => p.name === 'R')).toMatchObject({ valueText: '5', evaluated: 5 });
     expect(derived.connections.map((c) => [c.equationIndex, c.inherited ?? false])).toEqual([[0, false], [-1, true], [-1, true], [-1, true], [-1, true], [-1, true]]);
     expect(derived.connections[0]).toMatchObject({ from: 'pin', to: 'load.p' });
-    expect(derived.diagnostics.some((d) => d.severity === 'error' && d.path === 'Circuits.RC.broken')).toBe(true);
+    expect(derived.diagnostics).toContainEqual(expect.objectContaining({ severity: 'error', path: 'Circuits.ExtendedRC.broken', file: 'Circuits.mo', code: 'unresolved-class' }));
   });
 });
 

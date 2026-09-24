@@ -122,8 +122,6 @@ export interface Ctx {
   usedModifiers: Set<string>;
   /** Equations produced from when-clauses assign these variables (they become discrete). */
   whenTargets: Set<string>;
-  /** Flat equations from connections and bindings are appended here by the respective phases. */
-  connectionEquations: FlatEquation[];
 }
 
 export interface DiagOptions {

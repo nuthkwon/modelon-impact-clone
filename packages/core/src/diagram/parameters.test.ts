@@ -127,10 +127,10 @@ describe('getVariables', () => {
   });
 
   it('excludes sub-components but includes record fields', () => {
+    // `placedData` is a plain (non-parameter) record component: its `parameter`/`constant` fields are not variables.
     const vars = getVariables(registry, 'Loop');
-    expect(vars.map((v) => v.name)).toEqual(['placedData.a', 'placedData.b', 'placedData.n']);
-    expect(vars[1]).toMatchObject({ unit: 'm', inConnector: false, variability: 'continuous' });
-    expect(vars[2].variability).toBe('discrete');
+    expect(vars.map((v) => v.name)).toEqual(['placedData.b']);
+    expect(vars[0]).toMatchObject({ typeName: 'Real', unit: 'm', inConnector: false, variability: 'continuous', description: 'Field b' });
     expect(getVariables(registry, 'Circuits.RC').map((v) => v.name)).toEqual(['pin.v', 'pin.i', 'hidden']);
   });
 });
