@@ -473,11 +473,20 @@ describe('flatten: causal connectors', () => {
         connect(r2.n, n);
       end TwoResistors;
     end Tests;`);
-    const m = flatten(registry, 'Tests.TwoResistors', { strict: false });
+    // Balanced in strict mode: the environment closes the top-level connectors (p.i = n.i = free.i = 0).
+    const m = flatten(registry, 'Tests.TwoResistors');
     const flows = m.equations.filter((e) => e.kind === 'connect-flow').map(eqText);
     expect(flows).toEqual(['-p.i + r1.p.i = 0', 'r1.n.i + r2.p.i = 0', 'r2.n.i - n.i = 0']);
-    const unconnected = m.equations.filter((e) => e.kind === 'unconnected-flow').map(eqText);
-    expect(unconnected).toEqual(['dangling.p.i = 0', 'dangling.n.i = 0', 'free.i = 0']);
+    const unconnected = m.equations.filter((e) => e.kind === 'unconnected-flow');
+    expect(unconnected.map(eqText)).toEqual(['dangling.p.i = 0', 'dangling.n.i = 0', 'p.i = 0', 'n.i = 0', 'free.i = 0']);
+    expect(unconnected.map((e) => e.origin)).toEqual([
+      'dangling.p (unconnected)',
+      'dangling.n (unconnected)',
+      'p (top-level connector, flow set by the environment)',
+      'n (top-level connector, flow set by the environment)',
+      'free (unconnected)',
+    ]);
+    expect(m.stats).toMatchObject({ unknowns: 24, equations: 24 });
   });
 });
 
@@ -733,10 +742,15 @@ describe('flatten: when-clauses and discrete variables', () => {
     expect(variable(m, 'count')).toMatchObject({ type: 'Integer', variability: 'discrete' });
     expect(variable(m, 'on')).toMatchObject({ type: 'Boolean', variability: 'discrete', attributes: { start: false } });
     expect(m.whenClauses.length).toBe(2);
-    expect(printExpr(m.whenClauses[1].cond)).toBe('x > 10 and not sample(0.25, 0.25)');
+    // The elsewhen branch fires on its own rising edge unless the first condition rises at the
+    // same instant; the edge of `sample(...)` is observed through a hidden Boolean helper.
+    expect(printExpr(m.whenClauses[0].cond)).toBe('sample(0.25, 0.25)');
+    expect(printExpr(m.whenClauses[1].cond)).toBe('x > 10 and not edge($whenCondition1)');
+    expect(variable(m, '$whenCondition1')).toMatchObject({ type: 'Boolean', variability: 'discrete', protected: true, attributes: { start: false } });
+    expect(m.equations.map(eqText)).toContain('$whenCondition1 = sample(0.25, 0.25)');
     expect(m.whenClauses[0].equations.map(eqText)).toEqual(['count = pre(count) + 1', 'held = x']);
-    expect(m.stats.unknowns).toBe(4);
-    expect(m.equations.length).toBe(2);
+    expect(m.stats.unknowns).toBe(5);
+    expect(m.equations.length).toBe(3);
   });
 
   it('drops assert/terminate with diagnostics and rejects reinit outside when', () => {
@@ -915,6 +929,364 @@ describe('flatten: enumerations', () => {
     const m2 = flatten(registry, 'Tests.EnumParam', { modifiers: { initType: 'NoInit' } });
     expect(m2.initialEquations.map(eqText)).toEqual(['x = 1']);
     expect(() => flatten(registry, 'Tests.EnumParam', { modifiers: { initType: 'Bogus' } })).toThrow(/not a literal of its enumeration type/);
+  });
+});
+
+describe('flatten: elsewhen priority (finding: elsewhen never fires once an earlier condition stays true)', () => {
+  const stepModel = `package Tests
+      model W
+        discrete Real x(start=0, fixed=true);
+        Real y(start=0, fixed=true);
+      equation
+        der(y) = 1;
+        when time >= 1 then
+          x = 1;
+        elsewhen time >= 2 then
+          x = 2;
+        end when;
+      end W;
+      model Threshold
+        discrete Integer mode(start=0, fixed=true);
+        Real y(start=0, fixed=true);
+      equation
+        der(y) = 1;
+        when y > 0.5 then
+          mode = 1;
+        elsewhen y > 1.5 then
+          mode = 2;
+        end when;
+      end Threshold;
+      model Simultaneous
+        Boolean b1;
+        Boolean b2;
+        discrete Integer a(start=0, fixed=true);
+      equation
+        b1 = time >= 1;
+        b2 = time >= 1;
+        when b1 then
+          a = 1;
+        elsewhen b2 then
+          a = 2;
+        end when;
+      end Simultaneous;
+      model Three
+        discrete Integer a(start=0, fixed=true);
+        parameter Boolean never = false;
+      equation
+        when never then
+          a = 9;
+        elsewhen time >= 1 then
+          a = 1;
+        elsewhen time >= 2 then
+          a = 2;
+        end when;
+      end Three;
+    end Tests;`;
+
+  it('lowers elsewhen to raw conditions guarded by not edge(helper) with a hidden Boolean per earlier condition', () => {
+    const m = flatten(makeRegistry(stepModel), 'Tests.W');
+    expect(m.whenClauses.map((w) => printExpr(w.cond))).toEqual(['time >= 1', 'time >= 2 and not edge($whenCondition1)']);
+    const helper = variable(m, '$whenCondition1');
+    expect(helper).toMatchObject({ type: 'Boolean', variability: 'discrete', causality: 'none', protected: true, declaredIn: 'Tests.W', componentPath: [] });
+    expect(m.equations.filter((e) => e.origin.includes('when-condition helper')).map(eqText)).toEqual(['$whenCondition1 = time >= 1']);
+    expect(m.stats).toMatchObject({ unknowns: 3, equations: 2 }); // x is when-assigned (counted by the balance check)
+    expect(m.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+  });
+
+  it('fires the elsewhen branch when its own condition becomes true while the first stays true (time steps)', () => {
+    const flat = flatten(makeRegistry(stepModel), 'Tests.W');
+    const res = simulate(flat, { startTime: 0, finalTime: 3, ncp: 30, solver: 'CVode' });
+    const x = res.trajectories.find((t) => t.name === 'x')!;
+    const at = (t: number) => x.values[res.time.findIndex((tt) => tt >= t - 1e-9)];
+    expect(at(0.5)).toBe(0);
+    expect(at(1.5)).toBe(1);
+    expect(at(2.5)).toBe(2);
+    expect(x.values[x.values.length - 1]).toBe(2);
+    expect(res.trajectories.some((t) => t.name === '$whenCondition1')).toBe(true);
+  });
+
+  it('fires the elsewhen branch on state thresholds', () => {
+    const flat = flatten(makeRegistry(stepModel), 'Tests.Threshold');
+    const res = simulate(flat, { startTime: 0, finalTime: 3, ncp: 30, solver: 'CVode' });
+    const mode = res.trajectories.find((t) => t.name === 'mode')!;
+    expect(mode.values[mode.values.length - 1]).toBe(2);
+    expect(mode.values[res.time.findIndex((t) => t >= 1 - 1e-9)]).toBe(1);
+  });
+
+  it('gives the first branch priority when several conditions become true at the same instant, and uses Boolean variables directly', () => {
+    const flat = flatten(makeRegistry(stepModel), 'Tests.Simultaneous');
+    expect(flat.whenClauses.map((w) => printExpr(w.cond))).toEqual(['b1', 'b2 and not edge(b1)']);
+    expect(flat.variables.some((v) => v.name.startsWith('$whenCondition'))).toBe(false);
+    const res = simulate(flat, { startTime: 0, finalTime: 2, ncp: 20, solver: 'CVode' });
+    const a = res.trajectories.find((t) => t.name === 'a')!;
+    expect(a.values[a.values.length - 1]).toBe(1);
+  });
+
+  it('skips constant conditions (no edge) and chains several elsewhen branches', () => {
+    const flat = flatten(makeRegistry(stepModel), 'Tests.Three');
+    expect(flat.whenClauses.map((w) => printExpr(w.cond))).toEqual(['never', 'time >= 1', 'time >= 2 and not edge($whenCondition1)']);
+    expect(flat.variables.filter((v) => v.name.startsWith('$whenCondition')).map((v) => v.name)).toEqual(['$whenCondition1']);
+    const res = simulate(flat, { startTime: 0, finalTime: 3, ncp: 30, solver: 'CVode' });
+    const a = res.trajectories.find((t) => t.name === 'a')!;
+    expect(a.values[a.values.length - 1]).toBe(2);
+  });
+});
+
+describe('flatten: hierarchical connectors (findings: partial composite connectors, whole-vs-sub connection sets, top-level connectors)', () => {
+  const plugLib = `package Tests
+      connector Plug
+        Mini.Interfaces.Pin pin1;
+        Mini.Interfaces.Pin pin2;
+      end Plug;
+      model Dev
+        Plug plug;
+        Mini.Components.Resistor r(R=10);
+      equation
+        connect(plug.pin1, r.p);
+        connect(plug.pin2, r.n);
+      end Dev;
+      model Sys
+        Dev d;
+        Mini.Components.ConstantVoltage v;
+        Mini.Components.Ground g;
+      equation
+        connect(d.plug.pin1, v.p);
+        connect(v.n, g.p);
+        connect(d.plug.pin2, g.p);
+      end Sys;
+      model Partial
+        Dev d;
+        Mini.Components.ConstantVoltage v;
+        Mini.Components.Ground g;
+      equation
+        connect(d.plug.pin1, v.p);
+        connect(v.n, g.p);
+      end Partial;
+      model WholeAndSub
+        Dev d1;
+        Dev d2;
+        Mini.Components.Ground g;
+        Mini.Components.ConstantVoltage v;
+      equation
+        connect(d1.plug, d2.plug);
+        connect(d1.plug.pin1, v.p);
+        connect(v.n, g.p);
+        connect(d1.plug.pin2, g.p);
+      end WholeAndSub;
+      model TopPin
+        Mini.Interfaces.Pin p;
+        Mini.Components.Resistor r(R=1);
+        Mini.Components.Ground g;
+      equation
+        connect(p, r.p);
+        connect(r.n, g.p);
+      end TopPin;
+      model TopInput
+        Mini.Interfaces.RealInput u;
+        Mini.Blocks.Gain g(k=2);
+      equation
+        connect(u, g.u);
+      end TopInput;
+      model TopPlug
+        Plug plug;
+        Mini.Components.Resistor r(R=1);
+      equation
+        connect(plug.pin1, r.p);
+      end TopPlug;
+    end Tests;`;
+
+  it('does not zero the flow of a sub-connector that is already in a connection set (partially connected composite connector)', () => {
+    const registry = makeRegistry(plugLib);
+    const m = flatten(registry, 'Tests.Sys');
+    expect(m.equations.filter((e) => e.kind === 'unconnected-flow')).toEqual([]);
+    const flows = m.equations.filter((e) => e.kind === 'connect-flow').map(eqText);
+    expect(flows).toEqual(expect.arrayContaining(['d.plug.pin1.i + v.p.i = 0', 'v.n.i + g.p.i + d.plug.pin2.i = 0']));
+    expect(flows.length).toBe(2 + 2); // two sets in Sys, two inside Dev
+    expect(m.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+
+    // Only the untouched sub-connector gets flow = 0.
+    const p = flatten(registry, 'Tests.Partial');
+    const zero = p.equations.filter((e) => e.kind === 'unconnected-flow');
+    expect(zero.map(eqText)).toEqual(['d.plug.pin2.i = 0']);
+    expect(zero[0].origin).toBe('d.plug.pin2 (unconnected)');
+  });
+
+  it('merges a whole-connector connect with a sub-connector connect of the same connector into one set', () => {
+    const m = flatten(makeRegistry(plugLib), 'Tests.WholeAndSub');
+    const flows = m.equations.filter((e) => e.kind === 'connect-flow' && !e.origin.includes('.r.'));
+    const texts = flows.map(eqText);
+    expect(texts).toContain('d1.plug.pin1.i + d2.plug.pin1.i + v.p.i = 0');
+    expect(texts).toContain('d1.plug.pin2.i + d2.plug.pin2.i + v.n.i + g.p.i = 0');
+    expect(texts.filter((t) => t.includes('d1.plug.pin1.i')).length).toBe(1);
+    const potentials = m.equations.filter((e) => e.kind === 'connect-potential').map(eqText);
+    expect(potentials).toEqual(expect.arrayContaining(['d1.plug.pin1.v = d2.plug.pin1.v', 'd1.plug.pin1.v = v.p.v', 'd1.plug.pin2.v = d2.plug.pin2.v', 'd1.plug.pin2.v = v.n.v', 'd1.plug.pin2.v = g.p.v']));
+    const origins = m.equations.filter((e) => e.kind === 'connect-flow').map((e) => e.origin);
+    expect(origins).toContain('connect(d1.plug, d2.plug, v.p)');
+    expect(m.stats).toMatchObject({ unknowns: 34, equations: 34 });
+  });
+
+  it('closes internally connected top-level connectors and inputs with environment equations (locally balanced models)', () => {
+    const registry = makeRegistry(plugLib);
+    const pin = flatten(registry, 'Tests.TopPin');
+    expect(pin.equations.filter((e) => e.kind === 'connect-flow').map(eqText)).toEqual(['-p.i + r.p.i = 0', 'r.n.i + g.p.i = 0']);
+    const env = pin.equations.filter((e) => e.kind === 'unconnected-flow');
+    expect(env.map(eqText)).toEqual(['p.i = 0']);
+    expect(env[0].origin).toBe('p (top-level connector, flow set by the environment)');
+    expect(pin.stats).toMatchObject({ unknowns: 13, equations: 13 });
+
+    const input = flatten(registry, 'Tests.TopInput');
+    expect(input.equations.map(eqText)).toEqual(['g.y = g.k*g.u', 'u = g.u', 'u = 0']);
+    expect(input.equations[2]).toMatchObject({ kind: 'binding', origin: 'u (top-level input, value set by the environment)' });
+    expect(input.diagnostics.map((d) => d.message)).toEqual(expect.arrayContaining([expect.stringMatching(/Top-level input 'u' has no value; using 0/)]));
+    expect(input.stats).toMatchObject({ unknowns: 3, equations: 3 });
+
+    // Every flow leaf of a top-level hierarchical connector is closed, connected or not.
+    const plug = flatten(registry, 'Tests.TopPlug');
+    const zero = plug.equations.filter((e) => e.kind === 'unconnected-flow');
+    expect(zero.map(eqText)).toEqual(['r.n.i = 0', 'plug.pin1.i = 0', 'plug.pin2.i = 0']);
+    expect(zero.map((e) => e.origin)).toEqual(['r.n (unconnected)', 'plug.pin1 (top-level connector, flow set by the environment)', 'plug.pin2 (unconnected)']);
+    expect(plug.stats).toMatchObject({ unknowns: 10, equations: 10 });
+  });
+});
+
+describe('flatten: enumeration ordinals (finding: relational operators and Integer() reject enumerations)', () => {
+  const lib = `package Tests
+      type Init = enumeration(NoInit, SteadyState, InitialState);
+      type Other = enumeration(A, B);
+      constant Init defaultInit = Init.InitialState;
+      model G
+        parameter Init init = Init.SteadyState;
+        parameter Boolean b2 = init > Init.NoInit;
+        parameter Boolean b3 = Init.SteadyState >= Init.InitialState;
+        parameter Boolean b4 = Mini.Types.Init.NoInit < Mini.Types.Init.InitialState;
+        parameter Boolean b5 = defaultInit > init;
+        parameter Boolean b6 = StateSelect.prefer > StateSelect.default;
+        parameter Integer i = Integer(init);
+        parameter Integer j = Integer(Init.InitialState) - Integer(defaultInit);
+        parameter Boolean eq = init == Init.SteadyState;
+        Real x(start=1, fixed=true);
+      equation
+        der(x) = if b2 then -x else x;
+      end G;
+      model Mixed
+        parameter Init init = Init.SteadyState;
+        parameter Boolean bad = init > Other.A;
+      end Mixed;
+      model NonParam
+        Init state;
+        parameter Boolean bad = state > Init.NoInit;
+      equation
+        state = Init.NoInit;
+      end NonParam;
+    end Tests;`;
+
+  it('compares enumeration literals by declaration order and yields the ordinal for Integer()', () => {
+    const registry = makeRegistry(lib);
+    const m = flatten(registry, 'Tests.G');
+    expect(variable(m, 'b2').value).toBe(true);
+    expect(variable(m, 'b3').value).toBe(false);
+    expect(variable(m, 'b4').value).toBe(true);
+    expect(variable(m, 'b5').value).toBe(true);
+    expect(variable(m, 'b6').value).toBe(true);
+    expect(variable(m, 'i').value).toBe(2);
+    expect(variable(m, 'j').value).toBe(0);
+    expect(variable(m, 'eq').value).toBe(true);
+    expect(variable(m, 'init').value).toBe('SteadyState');
+    expect(printExpr(variable(m, 'b2').binding!)).toBe('2 > 1');
+    expect(m.equations.map(eqText)).toEqual(['der(x) = if b2 then -x else x']);
+
+    const m2 = flatten(registry, 'Tests.G', { modifiers: { init: 'NoInit' } });
+    expect(variable(m2, 'b2').value).toBe(false);
+    expect(variable(m2, 'i').value).toBe(1);
+    expect(variable(m2, 'b5').value).toBe(true);
+  });
+
+  it('rejects comparisons of different enumeration types and of non-parameter enumeration variables', () => {
+    const registry = makeRegistry(lib);
+    expect(() => flatten(registry, 'Tests.Mixed')).toThrow(/different enumeration types/);
+    expect(() => flatten(registry, 'Tests.NonParam')).toThrow(/must be a parameter or constant/);
+  });
+});
+
+describe('flatten: conditional components referring to later components (finding: declaration-order evaluation)', () => {
+  it('evaluates a condition that uses a parameter of a class-typed component declared later', () => {
+    const registry = makeRegistry(`package Tests
+      model CondOrder
+        Mini.Blocks.Gain g2 if g1.k > 0;
+        Mini.Blocks.Gain g1(k=1);
+        Mini.Blocks.Gain g3 if g1.k < 0;
+        parameter Real p = g1.k if g1.k > 0;
+      end CondOrder;
+    end Tests;`);
+    const m = flatten(registry, 'Tests.CondOrder', { strict: false });
+    expect(names(m)).toEqual(['g1.u', 'g1.y', 'g1.k', 'g2.u', 'g2.y', 'g2.k', 'p']);
+    expect(variable(m, 'p').value).toBe(1);
+    expect(m.equations.map(eqText)).toEqual(['g1.y = g1.k*g1.u', 'g2.y = g2.k*g2.u']);
+  });
+});
+
+describe('flatten: diamond inheritance (finding: later extends modifications silently dropped)', () => {
+  const lib = `package Tests
+      model Base0
+        Real x(start=0);
+      equation
+        der(x) = -x;
+      end Base0;
+      partial model P1
+        extends Base0(x(start=1));
+      end P1;
+      partial model P2
+        extends Base0(x(start=2));
+      end P2;
+      partial model P1b
+        extends Base0(x(start=1));
+      end P1b;
+      model Diamond
+        extends P1;
+        extends P2;
+      end Diamond;
+      model Same
+        extends P1;
+        extends P1b;
+      end Same;
+      model OuterWins
+        extends P1(x(start=5));
+        extends P2(x(start=5));
+      end OuterWins;
+      model Q1
+        extends Base0;
+        Real y(start=0);
+      equation
+        der(y) = -y;
+      end Q1;
+      partial model Q2
+        extends Base0;
+      end Q2;
+      model OwnElements
+        extends Q1(y(start=3));
+        extends Q2;
+      end OwnElements;
+      model MissingOnOnePath
+        extends P1;
+        extends Q2;
+      end MissingOnOnePath;
+    end Tests;`;
+
+  it('rejects a base class inherited through two paths with different modifications', () => {
+    const registry = makeRegistry(lib);
+    const err = catchError(() => flatten(registry, 'Tests.Diamond'));
+    expect(err.message).toMatch(/Class Tests\.Base0 is inherited more than once by Tests\.Diamond with different modifications: 'x\.start' is 1 \(via extends Base0 in Tests\.P1\) but 2 \(via extends Base0 in Tests\.P2\)/);
+    expect(err.diagnostics[0]).toMatchObject({ severity: 'error', file: 'Tests.mo', loc: expect.anything() });
+    expect(() => flatten(registry, 'Tests.MissingOnOnePath')).toThrow(/'x\.start' is 1 .* but <no modification>/);
+  });
+
+  it('accepts identical modifications, outer modifications that make the paths agree, and modifications of derived-class elements', () => {
+    const registry = makeRegistry(lib);
+    expect(variable(flatten(registry, 'Tests.Same'), 'x').attributes.start).toBe(1);
+    expect(variable(flatten(registry, 'Tests.OuterWins'), 'x').attributes.start).toBe(5);
+    const own = flatten(registry, 'Tests.OwnElements');
+    expect(variable(own, 'y').attributes.start).toBe(3);
+    expect(own.equations.map(eqText)).toEqual(['der(x) = -x', 'der(y) = -y']);
   });
 });
 

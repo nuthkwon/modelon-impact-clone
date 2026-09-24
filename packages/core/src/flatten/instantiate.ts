@@ -8,9 +8,13 @@
  * the outermost). Every modifier keeps the scope in which its expression was written.
  *
  * Builtin-typed components (Real, Integer, Boolean, String, enumerations) become
- * `VariableInstance`s; connector/record/model/block components recurse. Leaf variables are
- * created before class-typed components so that the conditions of conditional components can
- * be evaluated against parameters declared anywhere in the same class.
+ * `VariableInstance`s; connector/record/model/block components recurse. Unconditional
+ * components (leaf variables first, then class-typed ones) are created before conditional
+ * ones so that a condition can use parameters declared anywhere in the same class, including
+ * parameters of class-typed components declared after the conditional component.
+ *
+ * A base class reached through several extends paths (diamond inheritance) is instantiated
+ * once; the modifications arriving through the different paths must be identical (Modelica §7.1).
  */
 import type { ComponentDecl, Expr, Modification, SourceLoc } from '../ast.js';
 import type { BaseType, Causality, Variability } from '../flat.js';
@@ -261,10 +265,24 @@ interface Element {
   mods: ModEntry;
 }
 
+/** First element modified differently in `a` and `b` (element names restricted to `relevant`), as `name = a vs b`; undefined when identical. */
+function findModConflict(a: ModEntry, b: ModEntry, relevant: Set<string> | undefined, prefix = ''): { name: string; a: string; b: string } | undefined {
+  const ta = a.value ? printExpr(a.value.expr) : undefined;
+  const tb = b.value ? printExpr(b.value.expr) : undefined;
+  if (ta !== tb) return { name: prefix, a: ta ?? '<no modification>', b: tb ?? '<no modification>' };
+  for (const k of new Set([...a.sub.keys(), ...b.sub.keys()])) {
+    if (relevant && !relevant.has(k)) continue;
+    const r = findModConflict(a.sub.get(k) ?? emptyMod(), b.sub.get(k) ?? emptyMod(), undefined, prefix ? `${prefix}.${k}` : k);
+    if (r) return r;
+  }
+  return undefined;
+}
+
 function populate(ctx: Ctx, inst: ClassInstance, incoming: ModEntry): void {
   const registry = ctx.registry;
   const elements: Element[] = [];
-  const visited = new Set<string>();
+  /** Base classes already collected, with the modifications they received and the path they were reached through. */
+  const visited = new Map<string, { mods: ModEntry; via: string }>();
   const modKeys: { name: string; from: string; loc?: SourceLoc; file?: string }[] = [];
   const instPath = inst.path || inst.cls.fullName;
 
@@ -273,9 +291,22 @@ function populate(ctx: Ctx, inst: ClassInstance, incoming: ModEntry): void {
     modKeys.push({ name: k, from: `modification of '${inst.path || inst.cls.fullName}'`, loc: v.value?.loc, file: v.value ? fileOf(ctx, v.value.scope.cls) : undefined });
   }
 
-  const collect = (cls: RegisteredClass, mods: ModEntry): void => {
-    if (visited.has(cls.fullName)) return;
-    visited.add(cls.fullName);
+  const collect = (cls: RegisteredClass, mods: ModEntry, via: string, viaOpts: { path: string; loc?: SourceLoc; file?: string }): void => {
+    const previous = visited.get(cls.fullName);
+    if (previous) {
+      // Repeated inheritance (diamond): the elements of `cls` are instantiated once, so the
+      // modifications arriving through every path must agree.
+      const relevant = new Set(registry.inheritanceChain(cls.fullName).flatMap((c) => c.def.components.map((d) => d.name)));
+      const conflict = findModConflict(previous.mods, mods, relevant);
+      if (conflict) {
+        throw error(
+          `Class ${cls.fullName} is inherited more than once by ${inst.cls.fullName} with different modifications: '${conflict.name}' is ${conflict.a} (${previous.via}) but ${conflict.b} (${via})`,
+          viaOpts,
+        );
+      }
+      return;
+    }
+    visited.set(cls.fullName, { mods, via });
     const file = fileOf(ctx, cls);
     const clsOpts = { path: instPath, loc: cls.def.nameLoc ?? cls.def.loc, file };
     if (cls.def.restriction === 'function') throw error(`Functions are not supported: ${cls.fullName}`, clsOpts);
@@ -294,13 +325,13 @@ function populate(ctx: Ctx, inst: ClassInstance, incoming: ModEntry): void {
       for (const k of extMods.sub.keys()) modKeys.push({ name: k, from: `extends ${ext.typeName} in ${cls.fullName}`, loc: ext.loc, file });
       let merged = mergeMods(ctx, mods, extMods, instPath);
       merged = mergeMods(ctx, merged, chainMods(ctx, resolved, instPath), instPath);
-      collect(resolved.base, merged);
+      collect(resolved.base, merged, `via extends ${ext.typeName} in ${cls.fullName}`, extOpts);
     }
     for (const decl of cls.def.components) elements.push({ decl, declaredIn: cls, mods: mods.sub.get(decl.name) ?? emptyMod() });
     for (const eq of cls.def.equations) inst.equations.push({ eq, scope: { cls, inst } });
     for (const eq of cls.def.initialEquations) inst.initialEquations.push({ eq, scope: { cls, inst } });
   };
-  collect(inst.cls, incoming);
+  collect(inst.cls, incoming, 'the class itself', { path: instPath, loc: inst.cls.def.nameLoc ?? inst.cls.def.loc, file: fileOf(ctx, inst.cls) });
 
   const declaredNames = new Map<string, RegisteredClass>();
   for (const el of elements) {
@@ -323,7 +354,10 @@ function populate(ctx: Ctx, inst: ClassInstance, incoming: ModEntry): void {
   const typed = elements.map((el) => ({ ...el, type: resolveComponentType(ctx, el.decl, el.declaredIn, inst.path ? `${inst.path}.${el.decl.name}` : el.decl.name) }));
   inst.order = typed.map((el) => el.decl.name);
 
-  // Pass 1: unconditional leaf variables; pass 2: conditional leaves; pass 3: class-typed components.
+  // Pass 1: unconditional leaf variables; pass 2: conditional leaves; pass 3: unconditional
+  // class-typed components; pass 4: conditional class-typed components. Declaration order is
+  // irrelevant in Modelica, so a condition may refer to parameters of any unconditional
+  // component (`Gain g2 if g1.k > 0; Gain g1(k=1);`).
   for (const el of typed) {
     if (isLeafType(el.type) && !el.decl.condition) inst.components.set(el.decl.name, createVariable(ctx, inst, el.decl, el.declaredIn, el.type, el.mods));
   }
@@ -337,8 +371,11 @@ function populate(ctx: Ctx, inst: ClassInstance, incoming: ModEntry): void {
     }
   }
   for (const el of typed) {
-    if (isLeafType(el.type)) continue;
-    if (el.decl.condition && !evaluateCondition(ctx, inst, el.decl, el.declaredIn)) {
+    if (!isLeafType(el.type) && !el.decl.condition) createSubInstance(ctx, inst, el.decl, el.declaredIn, el.type, el.mods);
+  }
+  for (const el of typed) {
+    if (isLeafType(el.type) || !el.decl.condition) continue;
+    if (!evaluateCondition(ctx, inst, el.decl, el.declaredIn)) {
       inst.disabled.add(el.decl.name);
       continue;
     }

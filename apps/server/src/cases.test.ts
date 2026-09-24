@@ -49,6 +49,16 @@ describe('expandCases', () => {
     expect(cases[3].parametrization).toEqual({ R: 200, b: false, fixed: 7 });
   });
 
+  it('caps the total number of cases before materialising them', () => {
+    expect(() => expandCases(definition({ R: 'range(1, 3, 3)', C: 'choices(1, 2)' }), 5)).toThrowError(/would expand to 6 cases, more than the maximum of 5/);
+    expect(() => expandCases(definition({ R: 'range(0, 1, 1e9)' }), 1000)).toThrowError(/count 1000000000 exceeds the maximum of 1000/);
+    expect(() => parseSweep('range(1, 2, 11)', 10)).toThrowError(/exceeds the maximum of 10/);
+    expect(() => parseSweep('choices(1, 2, 3)', 2)).toThrowError(/choices\(\) with 3 values exceeds the maximum of 2/);
+    expect(expandCases(definition({ R: 'range(1, 3, 3)', C: 'choices(1, 2)' }), 6)).toHaveLength(6);
+    // Several extensions add up.
+    expect(() => expandCases(definition({}, [{ modifiers: { variables: { R: 'range(1, 3, 3)' } } }, { modifiers: { variables: { R: 'range(1, 3, 3)' } } }]), 5)).toThrowError(/6 cases/);
+  });
+
   it('uses one case per extension (Impact semantics: the base is not a case), merging modifiers and analysis over the base', () => {
     const cases = expandCases(
       definition({ R: 100, C: 1 }, [

@@ -7,6 +7,8 @@
  * - class-level constants (`Modelica.Constants.pi`, imported constants, constants of enclosing
  *   packages) are evaluated and inlined as literals;
  * - enumeration literals (`Init.SteadyState`, `StateSelect.prefer`) become string literals;
+ *   relational operators and `Integer()` on enumeration operands are rewritten to the 1-based
+ *   ordinals of the literals (parameter operands are evaluated for that);
  * - builtin function calls pass through (a `Modelica.Math.` qualifier is stripped), any other
  *   call is an error.
  */
@@ -15,9 +17,12 @@ import { flatRef } from '../flat.js';
 import { printExpr } from '../parser/printer.js';
 import type { RegisteredClass } from '../registry.js';
 import { builtinName, evaluateConstant, getBinaryBuiltin, getUnaryBuiltin, MODELICA_CONSTANTS, type ConstValue } from './evaluate.js';
-import { error, fileOf, pathOf, type ClassInstance, type Ctx, type Instance, type Scope, type VariableInstance } from './types.js';
+import { getParamValue } from './parameters.js';
+import { error, fileOf, isParamLike, pathOf, type ClassInstance, type Ctx, type Instance, type Scope, type VariableInstance } from './types.js';
 
-const STATE_SELECT_LITERALS = new Set(['never', 'avoid', 'default', 'prefer', 'always']);
+const STATE_SELECT_ORDER = ['never', 'avoid', 'default', 'prefer', 'always'];
+const STATE_SELECT_LITERALS = new Set(STATE_SELECT_ORDER);
+const RELATIONAL_OPS = new Set(['<', '<=', '>', '>=']);
 
 /** Builtin operators/functions that are passed through to the solver. */
 const PASSTHROUGH_FUNCTIONS = new Set([
@@ -312,8 +317,13 @@ export function flattenExpr(ctx: Ctx, e: Expr, scope: Scope): Expr {
     }
     case 'unary':
       return { ...e, operand: flattenExpr(ctx, e.operand, scope) };
-    case 'binary':
+    case 'binary': {
+      if (RELATIONAL_OPS.has(e.op)) {
+        const enumRelation = flattenEnumerationRelation(ctx, e, scope);
+        if (enumRelation) return enumRelation;
+      }
       return { ...e, left: flattenExpr(ctx, e.left, scope), right: flattenExpr(ctx, e.right, scope) };
+    }
     case 'if':
       return {
         ...e,
@@ -345,6 +355,11 @@ function flattenCall(ctx: Ctx, e: Expr & { kind: 'call' }, scope: Scope): Expr {
     }
     throw error(`Function calls are not supported: ${e.callee}`, opts);
   }
+  if (name === 'Integer' && e.args.length === 1 && e.namedArgs.length === 0) {
+    // `Integer(E.x)` is the ordinal of the literal (Modelica §4.8.5.2).
+    const literals = enumerationLiteralsOf(ctx, e.args[0], scope);
+    if (literals) return ordinalExpr(ctx, e.args[0], literals, scope);
+  }
   if (name === 'der') {
     if (e.args.length !== 1 || e.namedArgs.length) throw error(`'der' expects exactly one argument: ${printExpr(e)}`, opts);
     const arg = e.args[0];
@@ -361,6 +376,106 @@ function flattenCall(ctx: Ctx, e: Expr & { kind: 'call' }, scope: Scope): Expr {
     namedArgs: e.namedArgs.map((n) => ({ name: n.name, value: flattenExpr(ctx, n.value, scope) })),
     loc: e.loc,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Enumerations in relational operators and Integer()
+// ---------------------------------------------------------------------------
+
+/**
+ * `a < b` etc. with enumeration operands: enumeration literals are ordered by declaration
+ * (Modelica §3.5), so both operands are replaced by their 1-based ordinals. Returns undefined
+ * when neither operand has an enumeration type.
+ */
+function flattenEnumerationRelation(ctx: Ctx, e: Expr & { kind: 'binary' }, scope: Scope): Expr | undefined {
+  const left = enumerationLiteralsOf(ctx, e.left, scope);
+  const right = enumerationLiteralsOf(ctx, e.right, scope);
+  if (!left && !right) return undefined;
+  if (left && right && left.join(',') !== right.join(',')) {
+    throw error(`Cannot compare ${printExpr(e.left)} with ${printExpr(e.right)}: the operands have different enumeration types`, {
+      path: pathOf(scope),
+      loc: e.loc,
+      file: fileOf(ctx, scope.cls),
+    });
+  }
+  return {
+    ...e,
+    left: left ? ordinalExpr(ctx, e.left, left, scope) : flattenExpr(ctx, e.left, scope),
+    right: right ? ordinalExpr(ctx, e.right, right, scope) : flattenExpr(ctx, e.right, scope),
+  };
+}
+
+/**
+ * The literals (in declaration order) of the enumeration type of `e`, when `e` references an
+ * enumeration-typed component, a class-level constant of enumeration type or an enumeration
+ * literal (`Init.SteadyState`, `StateSelect.prefer`); undefined otherwise.
+ */
+function enumerationLiteralsOf(ctx: Ctx, e: Expr, scope: Scope): string[] | undefined {
+  if (e.kind !== 'ref' || e.parts.some((p) => p.subscripts && p.subscripts.length > 0)) return undefined;
+  const registry = ctx.registry;
+  const names = e.parts.map((p) => p.name);
+  // A component of the instance.
+  if (!e.global && scope.inst) {
+    let cur: Instance | undefined = scope.inst.components.get(names[0]);
+    if (cur) {
+      for (let i = 1; cur && i < names.length; i++) cur = cur.kind === 'class' ? cur.components.get(names[i]) : undefined;
+      return cur?.kind === 'variable' ? cur.enumerationLiterals : undefined;
+    }
+  }
+  const lookup = (name: string): RegisteredClass | undefined => registry.lookup(e.global ? `.${name}` : name, scope.cls.fullName);
+  if (names.length >= 2) {
+    const last = names[names.length - 1];
+    if (!e.global && names.length === 2 && names[0] === 'StateSelect' && STATE_SELECT_LITERALS.has(last) && !lookup('StateSelect')) return STATE_SELECT_ORDER;
+    const cls = lookup(names.slice(0, -1).join('.'));
+    if (!cls) return undefined;
+    const literals = registry.resolveType(cls.fullName)?.enumerationLiterals;
+    if (literals) return literals.includes(last) ? literals : undefined;
+    return enumerationLiteralsOfMember(ctx, cls, last);
+  }
+  // A constant of the scope class (package scope) or of an enclosing class.
+  let cur: RegisteredClass | undefined = scope.inst ? (scope.cls.parentName ? registry.get(scope.cls.parentName) : undefined) : scope.cls;
+  while (cur) {
+    const literals = enumerationLiteralsOfMember(ctx, cur, names[0]);
+    if (literals) return literals;
+    cur = cur.parentName ? registry.get(cur.parentName) : undefined;
+  }
+  return undefined;
+}
+
+/** Literals of the enumeration type of the constant `name` declared in `cls` (or a base class), if any. */
+function enumerationLiteralsOfMember(ctx: Ctx, cls: RegisteredClass, name: string): string[] | undefined {
+  if (cls.builtin) return undefined;
+  for (const c of ctx.registry.inheritanceChain(cls.fullName)) {
+    const decl = c.def.components.find((d) => d.name === name);
+    if (!decl) continue;
+    const typeCls = ctx.registry.lookup(decl.typeName, c.fullName);
+    return typeCls ? ctx.registry.resolveType(typeCls.fullName)?.enumerationLiterals : undefined;
+  }
+  return undefined;
+}
+
+/** Flattens an enumeration-typed expression to the (1-based) ordinal of its value. */
+function ordinalExpr(ctx: Ctx, e: Expr, literals: string[], scope: Scope): Expr {
+  const opts = { path: pathOf(scope), loc: e.loc, file: fileOf(ctx, scope.cls) };
+  const flat = flattenExpr(ctx, e, scope);
+  let value: ConstValue | undefined;
+  if (flat.kind === 'string') {
+    value = flat.value;
+  } else if (isFlatVariableRef(flat)) {
+    const v = ctx.varsByPath.get(flat.parts[0].name);
+    if (!v || !isParamLike(v)) {
+      throw error(`Enumeration variable '${printExpr(e)}' must be a parameter or constant to be used in relational operators or Integer()`, opts);
+    }
+    value = getParamValue(ctx, v);
+  }
+  if (typeof value !== 'string') throw error(`Cannot determine the enumeration value of ${printExpr(e)}`, opts);
+  const ordinal = literals.indexOf(value) + 1;
+  if (ordinal === 0) throw error(`'${value}' is not a literal of the enumeration type of ${printExpr(e)} (${literals.join(', ')})`, opts);
+  return { kind: 'number', value: ordinal, loc: e.loc };
+}
+
+function isFlatVariableRef(e: Expr): e is Expr & { kind: 'ref' } {
+  return e.kind === 'ref' && e.parts.length === 1;
 }
 
 /** Flattens a reference that must denote a scalar variable (e.g. the target of `reinit` or a when-assignment). */
