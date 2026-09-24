@@ -1,0 +1,22 @@
+{
+  "name": "Smoke WS",
+  "format": "1.0.0",
+  "createdAt": "2026-09-24T07:01:18.498Z",
+  "updatedAt": "2026-09-24T07:01:23.467Z",
+  "projects": [
+    {
+      "reference": {
+        "id": "prj_kqaxso7h4e"
+      },
+      "disabled": false
+    }
+  ],
+  "dependencies": [
+    {
+      "reference": {
+        "id": "modelica"
+      },
+      "disabled": false
+    }
+  ]
+}

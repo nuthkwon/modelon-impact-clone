@@ -1,0 +1,22 @@
+{
+  "definition": {
+    "name": "Examples",
+    "format": "1.0.0",
+    "content": [
+      {
+        "id": "cnt_nx7mm04d3n",
+        "relpath": "Examples.mo",
+        "contentType": "MODELICA",
+        "name": "Examples",
+        "defaultDisabled": false,
+        "readOnly": false
+      }
+    ],
+    "dependencies": [
+      {
+        "name": "Modelica"
+      }
+    ]
+  },
+  "projectType": "LOCAL"
+}

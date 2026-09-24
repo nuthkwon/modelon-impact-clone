@@ -11,9 +11,15 @@ import { DEFAULT_COORDINATE_SYSTEM } from '@impact/core';
 import { useStore } from '../../store';
 import { Canvas } from './Canvas';
 
-// `renderToStaticMarkup` reads zustand's *server snapshot* (`getInitialState`), so point it at
-// the live state for this test module; otherwise every render would show the pristine store.
-useStore.getInitialState = () => useStore.getState();
+/**
+ * `renderToStaticMarkup` reads zustand's *server snapshot*, i.e. `api.getInitialState()`, while
+ * the components' imperative `useStore.getState()` calls read the live state. The initial state
+ * is a plain object that zustand never mutates, so seeding both keeps them consistent.
+ */
+function seedStore(patch: Partial<ReturnType<typeof useStore.getState>>): void {
+  useStore.setState(patch);
+  Object.assign(useStore.getInitialState(), patch);
+}
 
 const pinIcon = {
   coordinateSystem: DEFAULT_COORDINATE_SYSTEM,
@@ -124,7 +130,7 @@ function seed(patch: Partial<ReturnType<typeof useStore.getState>> = {}) {
     const diags = registry.addFile('lib', 'Lib.mo', 'package Lib\n  model T\n  end T;\nend Lib;\n');
     expect(diags).toEqual([]);
   }
-  useStore.setState({
+  seedStore({
     workspaceId: 'ws',
     activeClass: 'Lib.T',
     diagram,
@@ -189,7 +195,8 @@ describe('Canvas rendering', () => {
     const html = render();
     expect(html).toContain('class="connection selected"');
     expect(html).toContain('class="connection-glow"');
-    expect((html.match(/connection-handle/g) ?? []).length).toBe(2);
+    // 4 points → 2 interior corners get handles (endpoints stay attached to their ports)
+    expect((html.match(/class="selection-handle connection-handle"/g) ?? []).length).toBe(2);
   });
 
   it('is read-only outside model mode and hides the rotation handle', () => {

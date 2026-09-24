@@ -1,0 +1,22 @@
+{
+  "name": "CurlWS",
+  "format": "1.0.0",
+  "createdAt": "2026-09-24T07:00:22.738Z",
+  "updatedAt": "2026-09-24T07:00:22.738Z",
+  "projects": [
+    {
+      "reference": {
+        "id": "prj_g945io56zk"
+      },
+      "disabled": false
+    }
+  ],
+  "dependencies": [
+    {
+      "reference": {
+        "id": "modelica"
+      },
+      "disabled": false
+    }
+  ]
+}

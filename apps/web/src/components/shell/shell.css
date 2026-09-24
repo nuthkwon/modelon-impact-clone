@@ -28,7 +28,8 @@
 .view-toggle button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.1); color: var(--nav-fg); }
 .view-toggle button.active { background: var(--nav-fg); color: var(--nav-bg); }
 .view-toggle button.active:hover:not(:disabled) { background: var(--nav-fg); color: var(--nav-bg); }
-.view-toggle button:disabled { opacity: 0.38; }
+.view-toggle button:disabled, .view-toggle button.disabled { opacity: 0.38; cursor: default; }
+.view-toggle button.disabled:hover { background: transparent; color: var(--nav-fg-muted); }
 .avatar { width: 28px; height: 28px; border-radius: 50%; background: var(--accent); color: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 500; }
 .avatar-button { width: 36px; height: 36px; margin-left: 2px; }
 .navbar-divider { width: 1px; height: 24px; background: rgba(255, 255, 255, 0.2); margin: 0 6px; }

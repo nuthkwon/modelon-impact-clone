@@ -67,7 +67,7 @@ export function NavBar({ navigate, home, onWorkspaceManagement }: NavBarProps) {
   ];
   const views: { view: View; icon: JSX.Element; label: string; disabled?: boolean }[] = [
     { view: 'diagram', icon: <DiagramIcon />, label: 'Diagram view' },
-    { view: 'code', icon: <CodeIcon />, label: 'Code view', disabled: !activeClass },
+    { view: 'code', icon: <CodeIcon />, label: activeClass ? 'Code view' : 'Code view (select a class first)', disabled: !activeClass },
   ];
 
   return (
@@ -115,7 +115,14 @@ export function NavBar({ navigate, home, onWorkspaceManagement }: NavBarProps) {
           <div className="view-toggle" role="group" aria-label="View">
             {views.map((v) => (
               <Tooltip key={v.view} text={v.label}>
-                <button type="button" className={view === v.view ? 'active' : ''} aria-pressed={view === v.view} aria-label={v.label} disabled={v.disabled} onClick={() => setView(v.view)}>
+                <button
+                  type="button"
+                  className={`${view === v.view ? 'active' : ''}${v.disabled ? ' disabled' : ''}`}
+                  aria-pressed={view === v.view}
+                  aria-disabled={v.disabled || undefined}
+                  aria-label={v.label}
+                  onClick={() => !v.disabled && setView(v.view)}
+                >
                   {v.icon}
                 </button>
               </Tooltip>
