@@ -216,7 +216,7 @@ describe('precision for tiny ranges around a large offset', () => {
       expect(v).toBeGreaterThanOrEqual(lo - 1e-14);
       expect(v).toBeLessThanOrEqual(hi + 1e-14);
     }
-    for (const l of labels) expect(l).not.toBe('-9.80665');
+    expect(t.find((x) => x.value === -9.80665)?.label).toBe('-9.80665');
   });
   it('shows enough exponent digits for a narrow range of large values', () => {
     const t = linearTicks(2500000, 2501000, 6);
@@ -235,6 +235,9 @@ describe('precision for tiny ranges around a large offset', () => {
     expect(formatTick(1e6, 1e6)).toBe('1e6');
     expect(roundToStep(3e-17, 1e-17)).toBe(3e-17);
     expect(roundToStep(-9.806650000000004, 1e-15)).toBe(-9.806650000000004);
+    expect(formatTick(-9.80665, 1e-15)).toBe('-9.80665');
+    expect(formatTick(-9.806650000000003, 1e-15)).toBe('-9.806650000000003');
+    expect(formatTick(0.1 + 0.2, 0.1)).toBe('0.3');
   });
   it('pads a span within floating-point noise like a constant, and a real span proportionally', () => {
     const d = padDomain([-9.806650000000005, -9.80665], 0.05);
@@ -243,7 +246,8 @@ describe('precision for tiny ranges around a large offset', () => {
     const [lo, hi] = padDomain([283.15, 283.16], 0.05);
     expect(lo).toBeCloseTo(283.1495, 9);
     expect(hi).toBeCloseTo(283.1605, 9);
-    expect(padDomain([0, 1e-13])).toEqual([-5e-15, 1e-13 + 5e-15]);
+    const pad = 1e-13 * 0.05;
+    expect(padDomain([0, 1e-13])).toEqual([-pad, 1e-13 + pad]);
   });
 });
 

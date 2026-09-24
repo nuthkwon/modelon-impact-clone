@@ -3,6 +3,7 @@
  * name (`resistor`) followed by rows `v`, `i`, `der(i)`; top-level variables belong to the model
  * itself and are listed first. Pure — unit-tested in legend.test.ts.
  */
+import { variableSegments } from '../results/variableTree';
 import type { ResolvedSeries } from './seriesState';
 
 /** `Examples.RLCCircuit` → `RLCCircuit`. */
@@ -19,16 +20,19 @@ export interface LegendGroup {
   items: LegendItem[];
 }
 
-/** Legend rows grouped by component (first dotted segment); top-level variables belong to the model itself. */
+/**
+ * Legend rows grouped by component (first segment of the variable name, `der(a.b)` counting as
+ * `a` → `der(b)` like the CALCULATED VALUES tree); top-level variables belong to the model itself.
+ */
 export function legendGroups(series: readonly ResolvedSeries[], className: string): LegendGroup[] {
   const model = shortClassName(className);
   const groups = new Map<string, LegendGroup>();
   for (const s of series) {
     const v = s.variable;
     const suffix = s.label.startsWith(v) ? s.label.slice(v.length) : '';
-    const dot = /^der\(/.test(v) ? -1 : v.indexOf('.');
-    const groupName = dot > 0 ? v.slice(0, dot) : model;
-    const name = s.label.startsWith(v) ? (dot > 0 ? v.slice(dot + 1) : v) + suffix : s.label;
+    const segs = variableSegments(v);
+    const groupName = segs.length > 1 ? segs[0] : model;
+    const name = s.label.startsWith(v) ? (segs.length > 1 ? segs.slice(1).join('.') : v) + suffix : s.label;
     let g = groups.get(groupName);
     if (!g) {
       g = { name: groupName, items: [] };

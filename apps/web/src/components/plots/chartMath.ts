@@ -22,31 +22,54 @@ export function niceStep(span: number, maxTicks = 6): number {
   return m * mag;
 }
 
-/** Rounds `v` to the decimal precision implied by `step` (kills 0.30000000000000004). */
+/** Decimal places implied by `step` (0 for steps ≥ 1), capped at what toFixed accepts. */
+function decimalsOf(step: number): number {
+  return Math.min(100, Math.max(0, -Math.floor(Math.log10(step) + 1e-9)));
+}
+
+/** Significant digits that show a value of magnitude `abs` at the resolution of `step` (1..17). */
+function significantDigits(abs: number, step: number): number {
+  const d = Math.floor(Math.log10(abs) + 1e-9) - Math.floor(Math.log10(step) + 1e-9) + 1;
+  return Math.min(17, Math.max(1, d));
+}
+
+/** Strips trailing zeros of a plain number or an exponent mantissa: `2.5000e+6` → `2.5e6`, `0.30` → `0.3`, `-0` → `0`. */
+function trimZeros(s: string): string {
+  const [mantissa, exp] = s.split('e');
+  let m = mantissa.includes('.') ? mantissa.replace(/\.?0+$/, '') : mantissa;
+  if (m === '-0') m = '0';
+  return exp === undefined ? m : `${m}e${exp.replace('+', '')}`;
+}
+
+/**
+ * Rounds `v` to the decimal precision implied by `step` (kills 0.30000000000000004) without
+ * dropping digits the step resolves: ticks 1e-17 apart stay 1e-17, 2e-17, … instead of 0.
+ */
 export function roundToStep(v: number, step: number): number {
-  const dec = Math.max(0, -Math.floor(Math.log10(step) + 1e-9));
-  const out = Number(v.toFixed(Math.min(dec, 15)));
+  const out = Number(v.toFixed(decimalsOf(step)));
   return out === 0 ? 0 : out;
 }
 
-/** Tick label: fixed decimals derived from `step`, exponent form for very large/small values. */
+/**
+ * Tick label: fixed decimals derived from `step`, exponent form for very large/small values. The
+ * precision follows the step in both forms, so ticks 200 apart around 2.5e6 read 2.5e6, 2.5002e6,
+ * … and ticks 1e-15 apart around -9.80665 keep the digits that tell them apart.
+ */
 export function formatTick(v: number, step?: number): string {
   if (!Number.isFinite(v)) return '';
   if (v === 0) return '0';
   const abs = Math.abs(v);
-  if (step && step > 0 && abs < step * 1e-6) return '0';
+  const st = step !== undefined && step > 0 && Number.isFinite(step) ? step : undefined;
+  if (st !== undefined && abs < st * 1e-6) return '0';
   if (abs >= 1e6 || abs < 1e-4) {
-    return Number(v.toPrecision(3)).toExponential().replace('e+', 'e');
+    return trimZeros(st !== undefined ? v.toExponential(significantDigits(abs, st) - 1) : Number(v.toPrecision(3)).toExponential());
   }
-  let s: string;
-  if (step && step > 0) {
-    const dec = Math.max(0, -Math.floor(Math.log10(step) + 1e-9));
-    s = v.toFixed(Math.min(dec, 12));
-  } else {
-    s = Number(v.toPrecision(4)).toString();
-  }
-  if (s.includes('.')) s = s.replace(/\.?0+$/, '');
-  return s === '-0' ? '0' : s;
+  if (st === undefined) return trimZeros(Number(v.toPrecision(4)).toString());
+  // Below the double's resolution toFixed prints binary noise ("-9.806649999999999"); the shortest
+  // round-trip form of the same value ("-9.80665") is just as exact, so take it when it is shorter.
+  const fixed = v.toFixed(decimalsOf(st));
+  const shortest = String(v);
+  return trimZeros(shortest.length < fixed.length && !shortest.includes('e') ? shortest : fixed);
 }
 
 /** Linear ticks at 1-2-5 steps covering [min, max] (inclusive when a tick lands on a bound). */
@@ -59,12 +82,17 @@ export function linearTicks(min: number, max: number, maxTicks = 6): Tick[] {
     max += pad;
   }
   const step = niceStep(max - min, maxTicks);
-  const start = Math.ceil(min / step - 1e-9) * step;
+  // Count steps from the multiple of `step` nearest `min` rather than from 0, so a small range far
+  // from the origin keeps its precision (i·step stays tiny next to the anchor).
+  const anchor = roundToStep(Math.round(min / step) * step, step);
+  const start = anchor + Math.ceil((min - anchor) / step - 1e-9) * step;
+  const tol = step * 1e-9;
   const ticks: Tick[] = [];
   for (let i = 0; i < 200; i++) {
-    const raw = start + i * step;
-    if (raw > max + step * 1e-9) break;
-    const value = roundToStep(raw, step);
+    const value = roundToStep(start + i * step, step);
+    if (value > max + tol) break;
+    // Skip float noise below the range and duplicates (steps below the double's resolution).
+    if (value < min - tol || (ticks.length > 0 && value <= ticks[ticks.length - 1].value)) continue;
     ticks.push({ value, label: formatTick(value, step) });
   }
   return ticks;
@@ -139,11 +167,20 @@ export function extent(arrays: number[][]): Domain | undefined {
   return lo <= hi ? [lo, hi] : undefined;
 }
 
-/** Pads a domain by `fraction` on each side; degenerate domains get ±10 % (or ±1 around 0). */
+/**
+ * True when [lo, hi] spans nothing beyond floating-point noise (≤ 1e-12 of its magnitude): the
+ * data is a constant such as der(v) = -9.80665 ± a few ULPs, and no axis can resolve it.
+ */
+export function isNoiseSpan(lo: number, hi: number): boolean {
+  return hi - lo <= Math.max(Math.abs(lo), Math.abs(hi)) * 1e-12;
+}
+
+/** Pads a domain by `fraction` on each side; a constant (or noise-level) domain gets ±10 % (or ±1 around 0). */
 export function padDomain([lo, hi]: Domain, fraction = 0.05): Domain {
-  if (lo === hi) {
-    const pad = lo === 0 ? 1 : Math.abs(lo) * 0.1;
-    return [lo - pad, hi + pad];
+  if (isNoiseSpan(lo, hi)) {
+    const mid = (lo + hi) / 2;
+    const pad = mid === 0 ? 1 : Math.abs(mid) * 0.1;
+    return [mid - pad, mid + pad];
   }
   const pad = (hi - lo) * fraction;
   return [lo - pad, hi + pad];
@@ -276,4 +313,26 @@ export function zoomDomain([lo, hi]: Domain, center: number, factor: number): Do
 /** Shifts a domain by `delta` in domain units. */
 export function panDomain([lo, hi]: Domain, delta: number): Domain {
   return [lo + delta, hi + delta];
+}
+
+export interface PlotArea {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/** Zoom factor of a wheel notch: 0.8 % per px of deltaY (clamped to ±60 px); exp keeps in and out symmetric. */
+export function wheelZoomFactor(deltaY: number): number {
+  return Math.exp(Math.sign(deltaY) * Math.min(Math.abs(deltaY), 60) * 0.008);
+}
+
+/**
+ * Domains after a wheel event at pixel (px, py), both zoomed around the value under the pointer;
+ * undefined when the pointer is outside the plotting area (tick labels, axis titles, margins).
+ */
+export function wheelZoom(xs: Scale, ys: Scale, area: PlotArea, px: number, py: number, deltaY: number): { x: Domain; y: Domain } | undefined {
+  if (px < area.left || px > area.left + area.width || py < area.top || py > area.top + area.height) return undefined;
+  const factor = wheelZoomFactor(deltaY);
+  return { x: zoomDomain(xs.domain, xs.invert(px), factor), y: zoomDomain(ys.domain, ys.invert(py), factor) };
 }

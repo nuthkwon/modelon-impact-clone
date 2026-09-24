@@ -71,11 +71,13 @@ export function resolveSeries(t: SeriesTarget, idx: number, ctx: SeriesContext):
   const known = ctx.resultVariables[t.result.id];
   if (known && t.variable !== 'time' && !known.includes(t.variable)) return { ...base, label: `${t.label} (not found)` };
   if (known && ctx.xVariable !== 'time' && !known.includes(ctx.xVariable)) return { ...base, label: `${t.label} (x not found)` };
-  const err = ctx.errors[t.yKey!] ?? ctx.errors[t.xKey!];
-  if (err) return { ...base, status: 'error', label: `${t.label} (error)` };
   let x = ctx.trajectories[t.xKey!];
   let y = ctx.trajectories[t.yKey!];
-  if (!x || !y) return { ...base, status: 'loading' };
+  if (!x || !y) {
+    // Cached data always wins: a recorded failure shows only while the data is still missing.
+    const err = ctx.errors[t.yKey!] ?? ctx.errors[t.xKey!];
+    return err ? { ...base, status: 'error', label: `${t.label} (error)` } : { ...base, status: 'loading' };
+  }
   if (!y.length || !x.length) return { ...base, label: `${t.label} (not found)` };
   // Parameters/constants come back as a single sample: draw them as a constant line.
   if (y.length === 1 && x.length > 1) y = new Array<number>(x.length).fill(y[0]);

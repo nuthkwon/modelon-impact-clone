@@ -2,22 +2,16 @@
  * Resolves a PlotWindow's traces into chart series: one series per (trace, case), fetched
  * through the store's trajectory cache. Multi-case results get `[case_2]` suffixes and a
  * palette rotation; traces bound to a non-active result get a `[ResultName]` suffix.
+ * A failed request shows as `(error)` only while its data is missing: data that arrives through
+ * another component wins, and the key is requested again after a pause (see ./seriesState).
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { PLOT_PALETTE, useStore } from '../../store';
 import type { PlotWindow, ResultEntry } from '../../store/types';
-import type { ChartSeries } from './PlotChart';
+import { SERIES_ERROR_RETRY_MS, canRequest, pruneErrors, resolveSeries } from './seriesState';
+import type { ResolvedSeries, SeriesError, SeriesTarget } from './seriesState';
 
-export type SeriesStatus = 'ready' | 'loading' | 'missing' | 'error';
-
-export interface ResolvedSeries extends ChartSeries {
-  traceIndex: number;
-  variable: string;
-  resultId?: string;
-  caseId?: string;
-  caseLabel?: string;
-  status: SeriesStatus;
-}
+export type { ResolvedSeries, SeriesStatus } from './seriesState';
 
 export interface PlotSeriesState {
   series: ResolvedSeries[];
@@ -25,19 +19,6 @@ export interface PlotSeriesState {
   error?: string;
   /** Result used for traces without an explicit resultId. */
   activeResult?: ResultEntry;
-}
-
-interface Target {
-  traceIndex: number;
-  variable: string;
-  hidden?: boolean;
-  color: string;
-  label: string;
-  result?: ResultEntry;
-  caseId?: string;
-  caseLabel?: string;
-  xKey?: string;
-  yKey?: string;
 }
 
 export function caseLabelOf(r: ResultEntry, index: number): string {
@@ -60,7 +41,9 @@ export function usePlotSeries(plot: PlotWindow, className: string): PlotSeriesSt
   const resultVariables = useStore((s) => s.resultVariables);
   const fetchTrajectories = useStore((s) => s.fetchTrajectories);
   const fetchResultVariables = useStore((s) => s.fetchResultVariables);
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [errors, setErrors] = useState<Record<string, SeriesError>>({});
+  /** Bumped once the oldest recorded failure is old enough to retry; re-runs the fetch effect. */
+  const [retryTick, setRetryTick] = useState(0);
   const requested = useRef(new Set<string>());
   const listed = useRef(new Set<string>());
 
@@ -69,8 +52,8 @@ export function usePlotSeries(plot: PlotWindow, className: string): PlotSeriesSt
     [results, activeResultId, className],
   );
 
-  const targets = useMemo<Target[]>(() => {
-    const out: Target[] = [];
+  const targets = useMemo<SeriesTarget[]>(() => {
+    const out: SeriesTarget[] = [];
     plot.traces.forEach((trace, i) => {
       const r = trace.resultId ? results.find((x) => x.id === trace.resultId) : activeResult;
       const resultSuffix = trace.resultId && r && r.id !== activeResult?.id ? ` [${r.name}]` : '';
@@ -104,8 +87,10 @@ export function usePlotSeries(plot: PlotWindow, className: string): PlotSeriesSt
     return out;
   }, [plot.traces, plot.xVariable, results, activeResult]);
 
-  // Fetch whatever is missing, grouped per (result, case) so one request covers x and y.
+  // Fetch whatever is missing, grouped per (result, case) so one request covers x and y. A key
+  // whose last request failed is left alone for SERIES_ERROR_RETRY_MS, then requested again.
   useEffect(() => {
+    const now = Date.now();
     const groups = new Map<string, { rid: string; cid: string; vars: Set<string> }>();
     const resultsToList = new Set<string>();
     for (const t of targets) {
@@ -116,7 +101,7 @@ export function usePlotSeries(plot: PlotWindow, className: string): PlotSeriesSt
         [t.xKey!, plot.xVariable],
         [t.yKey!, t.variable],
       ] as const) {
-        if (trajectories[key] || errors[key] || requested.current.has(key)) continue;
+        if (trajectories[key] || requested.current.has(key) || !canRequest(errors[key], now)) continue;
         if (known && v !== 'time' && !known.includes(v)) continue;
         const gk = `${t.result.id}/${t.caseId}`;
         let g = groups.get(gk);
@@ -136,17 +121,32 @@ export function usePlotSeries(plot: PlotWindow, className: string): PlotSeriesSt
       const keys = vars.map((v) => `${g.rid}/${g.cid}/${v}`);
       keys.forEach((k) => requested.current.add(k));
       fetchTrajectories(g.rid, g.cid, vars)
+        .then(() => {
+          // A re-fetch that succeeds clears the recorded failure (the data itself arrives via the store).
+          setErrors((prev) => {
+            if (!keys.some((k) => k in prev)) return prev;
+            const next = { ...prev };
+            keys.forEach((k) => delete next[k]);
+            return next;
+          });
+        })
         .catch((e: unknown) => {
-          const msg = e instanceof Error ? e.message : String(e);
+          const message = e instanceof Error ? e.message : String(e);
+          const at = Date.now();
           setErrors((prev) => {
             const next = { ...prev };
-            keys.forEach((k) => (next[k] = msg));
+            keys.forEach((k) => (next[k] = { message, at }));
             return next;
           });
         })
         .finally(() => keys.forEach((k) => requested.current.delete(k)));
     }
-  }, [targets, trajectories, resultVariables, errors, plot.xVariable, fetchTrajectories, fetchResultVariables]);
+  }, [targets, trajectories, resultVariables, errors, retryTick, plot.xVariable, fetchTrajectories, fetchResultVariables]);
+
+  // Data that arrived through another component (Calculated Values, stickies, …) supersedes a failure.
+  useEffect(() => {
+    setErrors((prev) => pruneErrors(prev, trajectories));
+  }, [trajectories]);
 
   // Forget errors for results that disappeared (e.g. after a delete) so a re-run can retry.
   useEffect(() => {
@@ -157,46 +157,26 @@ export function usePlotSeries(plot: PlotWindow, className: string): PlotSeriesSt
     });
   }, [results]);
 
+  // Wake the fetch effect once the oldest failure may be retried.
+  useEffect(() => {
+    const ats = Object.values(errors).map((e) => e.at);
+    if (!ats.length) return;
+    const wait = Math.max(0, Math.min(...ats) + SERIES_ERROR_RETRY_MS - Date.now()) + 20;
+    const id = window.setTimeout(() => setRetryTick((t) => t + 1), wait);
+    return () => window.clearTimeout(id);
+  }, [errors]);
+
   const series = useMemo<ResolvedSeries[]>(
-    () =>
-      targets.map((t, idx) => {
-        const id = `${t.traceIndex}:${t.result?.id ?? '-'}:${t.caseId ?? '-'}:${t.variable}:${idx}`;
-        const base: ResolvedSeries = {
-          id,
-          label: t.label,
-          color: t.color,
-          x: [],
-          y: [],
-          hidden: t.hidden,
-          traceIndex: t.traceIndex,
-          variable: t.variable,
-          resultId: t.result?.id,
-          caseId: t.caseId,
-          caseLabel: t.caseLabel,
-          status: 'missing',
-        };
-        if (!t.result) return { ...base, label: `${t.label} (no result)` };
-        if (!t.caseId) return { ...base, label: `${t.label} (no cases)` };
-        const known = resultVariables[t.result.id];
-        if (known && t.variable !== 'time' && !known.includes(t.variable)) return { ...base, label: `${t.label} (not found)` };
-        if (known && plot.xVariable !== 'time' && !known.includes(plot.xVariable)) return { ...base, label: `${t.label} (x not found)` };
-        const err = errors[t.yKey!] ?? errors[t.xKey!];
-        if (err) return { ...base, status: 'error', label: `${t.label} (error)` };
-        let x = trajectories[t.xKey!];
-        let y = trajectories[t.yKey!];
-        if (!x || !y) return { ...base, status: 'loading' };
-        if (!y.length || !x.length) return { ...base, label: `${t.label} (not found)` };
-        // Parameters/constants come back as a single sample: draw them as a constant line.
-        if (y.length === 1 && x.length > 1) y = new Array<number>(x.length).fill(y[0]);
-        if (x.length === 1 && y.length > 1) x = new Array<number>(y.length).fill(x[0]);
-        return { ...base, x, y, status: 'ready' };
-      }),
+    () => targets.map((t, idx) => resolveSeries(t, idx, { trajectories, resultVariables, errors, xVariable: plot.xVariable })),
     [targets, trajectories, resultVariables, errors, plot.xVariable],
   );
 
   const loading = series.some((s) => s.status === 'loading');
   const firstError = series.find((s) => s.status === 'error');
-  const error = firstError ? (errors[`${firstError.resultId}/${firstError.caseId}/${firstError.variable}`] ?? 'Failed to load trajectories') : undefined;
+  const error = firstError
+    ? (errors[`${firstError.resultId}/${firstError.caseId}/${firstError.variable}`] ?? errors[`${firstError.resultId}/${firstError.caseId}/${plot.xVariable}`])?.message ??
+      'Failed to load trajectories'
+    : undefined;
 
   return { series, loading, error, activeResult };
 }

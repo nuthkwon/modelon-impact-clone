@@ -13,6 +13,7 @@ import {
   extent,
   interpolateAt,
   isMonotonic,
+  isNoiseSpan,
   linearTicks,
   log10,
   logTicks,
@@ -22,7 +23,7 @@ import {
   padDomain,
   panDomain,
   pow10,
-  zoomDomain,
+  wheelZoom,
 } from './chartMath';
 import type { Domain, Scale, Tick } from './chartMath';
 import './plots.css';
@@ -50,6 +51,11 @@ export interface PlotChartProps {
   onCursorChange?: (t: number) => void;
   /** Series id to emphasise (legend hover); the others are dimmed. */
   highlightId?: string;
+  /**
+   * Any change of this value drops the zoom/pan window (the domains are meaningless once the x
+   * variable, the units or the plotted data change). Double-click / Reset do the same by hand.
+   */
+  resetKey?: string;
   /** Fixed size in px; omit to fill the parent (ResizeObserver). */
   height?: number;
   width?: number;
@@ -116,6 +122,7 @@ export function PlotChart({
   cursorTime,
   onCursorChange,
   highlightId,
+  resetKey,
   height,
   width,
   className,
@@ -151,10 +158,11 @@ export function PlotChart({
     return () => ro.disconnect();
   }, [width, height]);
 
-  // Reset zoom when the scale type changes (log/linear y domains are not comparable).
+  // Reset zoom when the scale type changes (log/linear y domains are not comparable) or when the
+  // caller says the plotted quantities changed (other x variable, units or data: see resetKey).
   useEffect(() => {
     setZoom(undefined);
-  }, [logY]);
+  }, [logY, resetKey]);
 
   const visible = useMemo(() => series.filter((s) => !s.hidden && s.x.length > 0 && s.y.length > 0), [series]);
 
@@ -174,7 +182,7 @@ export function PlotChart({
   const autoDomain = useMemo<ZoomState>(() => {
     const xe = extent(prepared.map((p) => p.x));
     const ye = extent(prepared.map((p) => p.y));
-    const x: Domain = xe ? (xe[0] === xe[1] ? padDomain(xe) : xe) : [0, 1];
+    const x: Domain = xe ? (isNoiseSpan(xe[0], xe[1]) ? padDomain(xe) : xe) : [0, 1];
     const y: Domain = ye ? padDomain(ye, 0.05) : logY ? [-1, 1] : [0, 1];
     return { x, y };
   }, [prepared, logY]);
@@ -329,22 +337,22 @@ export function PlotChart({
   };
 
   // Wheel zoom around the cursor. React registers wheel listeners as passive, so attach natively
-  // to be able to prevent the page/canvas from scrolling.
+  // to be able to prevent the page/canvas from scrolling. The listener lives on the wrapper, which
+  // is mounted from the first commit: without a fixed size the <svg> only appears after the
+  // container has been measured, i.e. after this once-only effect has already run.
   useEffect(() => {
-    const el = svgRef.current;
+    const el = wrapRef.current;
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
       const g = geomRef.current;
-      if (!g) return;
-      const r = el.getBoundingClientRect();
-      const px = e.clientX - r.left;
-      const py = e.clientY - r.top;
-      if (px < g.left || px > g.left + g.pw || py < g.top || py > g.top + g.ph) return;
+      const svg = svgRef.current;
+      if (!g || !svg) return;
+      const r = svg.getBoundingClientRect();
+      const next = wheelZoom(g.xs, g.ys, { left: g.left, top: g.top, width: g.pw, height: g.ph }, e.clientX - r.left, e.clientY - r.top, e.deltaY);
+      if (!next) return;
       e.preventDefault();
       e.stopPropagation();
-      const step = Math.sign(e.deltaY) * Math.min(Math.abs(e.deltaY), 60) * 0.008;
-      const factor = Math.exp(step);
-      setZoom({ x: zoomDomain(g.xs.domain, g.xs.invert(px), factor), y: zoomDomain(g.ys.domain, g.ys.invert(py), factor) });
+      setZoom(next);
     };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);

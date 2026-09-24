@@ -12,6 +12,7 @@ import { useContextMenu } from '../common/ContextMenu';
 import { Tooltip } from '../common/Tooltip';
 import { useShellActions } from '../shell/shellActions';
 import { Icon } from '../icons';
+import { csvDownloadFor } from './resultActions';
 import { forgetResultMeta } from './resultMeta';
 import { formatDuration, formatTimestamp } from './variableTree';
 import './results.css';
@@ -161,15 +162,18 @@ export function SimulationsTab(): JSX.Element {
     e.preventDefault();
     e.stopPropagation();
     const cid = caseIdFor(r);
+    // Only a successful case has a result file; otherwise the item is disabled and its tooltip says why.
+    const csv = csvDownloadFor(r, cid, wid);
     menu.open(e, [
       { label: 'Rename', onSelect: () => setRenaming({ id: r.id, draft: r.name }) },
       { label: 'Delete', danger: true, onSelect: () => void remove(r) },
       { label: '', separator: true },
       {
         label: 'Download result (CSV)',
-        disabled: !wid || !cid,
+        disabled: !csv.enabled,
+        title: csv.enabled ? undefined : csv.reason,
         onSelect: () => {
-          if (wid && cid) downloadUrl(api.caseResultCsvUrl(wid, r.id, cid), `${r.name}${r.cases.length > 1 ? `_${r.cases.find((c) => c.id === cid)?.meta?.label ?? cid}` : ''}.csv`);
+          if (csv.enabled && wid && cid) downloadUrl(api.caseResultCsvUrl(wid, r.id, cid), csv.filename);
         },
       },
       { label: '', separator: true },

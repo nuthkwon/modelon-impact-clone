@@ -16,13 +16,16 @@ import { Icon } from '../icons';
 import { displayInfo, displayUnitOf, unitOf, useCaseMeta } from '../results/resultMeta';
 import { PlotChart } from './PlotChart';
 import type { ChartSeries } from './PlotChart';
+import { legendGroups, shortClassName } from './legend';
+import { zoomResetKey } from './seriesState';
 import { usePlotSeries } from './usePlotSeries';
-import type { ResolvedSeries } from './usePlotSeries';
 import { hasVariableDrag, readVariableDrag } from './dragTypes';
 import './plots.css';
 
 export { VARIABLE_DRAG_TYPE, hasVariableDrag, readVariableDrag, setVariableDrag } from './dragTypes';
 export type { VariableDragPayload } from './dragTypes';
+export { legendGroups } from './legend';
+export type { LegendGroup, LegendItem } from './legend';
 
 export const PLOT_MIN_WIDTH = 240;
 export const PLOT_MIN_HEIGHT = 160;
@@ -30,39 +33,6 @@ const TOOLBAR_HEIGHT = 32;
 const X_ZONE_HEIGHT = 24;
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), Math.max(lo, hi));
-const shortName = (name: string) => name.split('.').pop() ?? name;
-
-export interface LegendItem {
-  series: ResolvedSeries;
-  /** Row text: the variable without its component prefix plus any `[case]` / `[Result]` suffix. */
-  name: string;
-}
-export interface LegendGroup {
-  /** Component name, or the model's short class name for top-level variables. */
-  name: string;
-  items: LegendItem[];
-}
-
-/** Legend rows grouped by component (first dotted segment); top-level variables belong to the model itself. */
-export function legendGroups(series: ResolvedSeries[], className: string): LegendGroup[] {
-  const model = shortName(className);
-  const groups = new Map<string, LegendGroup>();
-  for (const s of series) {
-    const v = s.variable;
-    const suffix = s.label.startsWith(v) ? s.label.slice(v.length) : '';
-    const dot = /^der\(/.test(v) ? -1 : v.indexOf('.');
-    const groupName = dot > 0 ? v.slice(0, dot) : model;
-    const name = s.label.startsWith(v) ? (dot > 0 ? v.slice(dot + 1) : v) + suffix : s.label;
-    let g = groups.get(groupName);
-    if (!g) {
-      g = { name: groupName, items: [] };
-      groups.set(groupName, g);
-    }
-    g.items.push({ series: s, name });
-  }
-  // the model's own variables first, then components in first-seen order
-  return [...groups.values()].sort((a, b) => (a.name === model ? -1 : b.name === model ? 1 : 0));
-}
 
 /** Closes a popup on outside pointerdown / Escape. */
 function useDismiss(open: boolean, refs: RefObject<HTMLElement | null>[], onClose: () => void) {
@@ -335,8 +305,11 @@ export function PlotWindowView({ className, plot, canvasRef }: PlotWindowViewPro
     [resolved, meta, showDisplayUnits, isTime, plot.xVariable, xDisp],
   );
   const emptyText = plot.traces.length === 0 ? 'Drag a variable here' : loading ? 'Loading…' : error ? 'Failed to load data' : 'No data';
+  // A zoom window only makes sense for the quantities it was made for: drop it when the x variable,
+  // the unit mode or the set of plotted (result, case, variable) changes.
+  const resetKey = zoomResetKey(plot.xVariable, resolved, showDisplayUnits);
   const groups = useMemo(() => legendGroups(resolved, className), [resolved, className]);
-  const modelName = shortName(className);
+  const modelName = shortClassName(className);
   const datalistId = `plot-xvars-${plot.id}`;
 
   return (
@@ -415,6 +388,7 @@ export function PlotWindowView({ className, plot, canvasRef }: PlotWindowViewPro
             cursorTime={isTime ? sliderTime : undefined}
             onCursorChange={isTime ? setSliderTime : undefined}
             highlightId={hoverId}
+            resetKey={resetKey}
             emptyText={emptyText}
           />
           {dragZone && (
