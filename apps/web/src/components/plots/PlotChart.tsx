@@ -1,7 +1,8 @@
 /**
- * Pure SVG line chart in the Plotly-like style of Modelon Impact (docs/UI_SPEC.md §5.5):
- * white surface, #e5e5e5 gridlines, 11px axis labels, 1.5px lines, hover guide + tooltip,
- * box zoom, wheel zoom, shift-drag pan, double-click reset, time-slider cursor.
+ * Pure SVG line chart in the Plotly-like style of Modelon Impact (docs/UI_SPEC.md §5.5 / §9):
+ * white surface, 1px `--plot-frame` frame, `--plot-grid` gridlines, 11px `--plot-axis` tick
+ * labels, 1.5px lines, dashed time-slider cursor, hover guide + tooltip, box zoom, wheel zoom,
+ * shift-drag pan, double-click reset, legend-hover highlight.
  * No charting libraries; all numeric work lives in ./chartMath (unit-tested).
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -47,6 +48,8 @@ export interface PlotChartProps {
   cursorTime?: number;
   /** Called when the user clicks the chart (x value at the pointer). */
   onCursorChange?: (t: number) => void;
+  /** Series id to emphasise (legend hover); the others are dimmed. */
+  highlightId?: string;
   /** Fixed size in px; omit to fill the parent (ResizeObserver). */
   height?: number;
   width?: number;
@@ -82,7 +85,7 @@ interface Geometry {
 }
 
 const MARGIN_TOP = 10;
-const MARGIN_RIGHT = 16;
+const MARGIN_RIGHT = 12;
 const TICK_FONT = 11;
 
 function buildPath(x: number[], y: number[], xs: Scale, ys: Scale): string {
@@ -112,6 +115,7 @@ export function PlotChart({
   showGrid = true,
   cursorTime,
   onCursorChange,
+  highlightId,
   height,
   width,
   className,
@@ -407,10 +411,9 @@ export function PlotChart({
           )}
           {zeroY !== undefined && <line className="plot-zeroline" x1={left} x2={left + pw} y1={crisp(zeroY)} y2={crisp(zeroY)} shapeRendering="crispEdges" />}
 
-          {/* axes frame */}
+          {/* frame around the plotting area */}
           <g className="plot-axis-lines" shapeRendering="crispEdges">
-            <line x1={crisp(left)} x2={crisp(left)} y1={MARGIN_TOP} y2={MARGIN_TOP + ph} />
-            <line x1={left} x2={left + pw} y1={crisp(MARGIN_TOP + ph)} y2={crisp(MARGIN_TOP + ph)} />
+            <rect x={crisp(left)} y={crisp(MARGIN_TOP)} width={Math.max(0, Math.round(pw))} height={Math.max(0, Math.round(ph))} />
           </g>
 
           {/* tick labels */}
@@ -453,7 +456,7 @@ export function PlotChart({
           {/* series */}
           <g clipPath={`url(#${clipId})`}>
             {paths.map((p) => (
-              <path key={p.id} className="plot-series" d={p.d} stroke={p.color} />
+              <path key={p.id} className={`plot-series${highlightId ? (p.id === highlightId ? ' hl' : ' dim') : ''}`} d={p.d} stroke={p.color} />
             ))}
             {cursorX !== undefined && <line className="plot-cursor" x1={cursorX} x2={cursorX} y1={MARGIN_TOP} y2={MARGIN_TOP + ph} />}
             {hoverInfo && (

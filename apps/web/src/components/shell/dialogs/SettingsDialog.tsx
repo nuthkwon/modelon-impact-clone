@@ -2,12 +2,21 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../../api/client';
 import { DEFAULT_ANALYSIS, DEFAULT_EXECUTION_SETTINGS, pointsOf, useStore } from '../../../store';
+import type { JSX } from 'react';
 import { Dialog } from '../../common/Dialog';
 import { Switch } from '../../common/Switch';
+import { DownloadIcon, PlayIcon, RulerIcon, SettingsIcon, StorageIcon } from '../../icons';
 import type { SettingsTab } from '../shellActions';
 import '../shell.css';
 
-const TABS: SettingsTab[] = ['Application', 'Execution', 'Export', 'Units', 'Workspace'];
+/** Left navigation of the dialog: icon + label rows, active = pale-orange pill (Impact's left nav look). */
+const TABS: { id: SettingsTab; icon: JSX.Element }[] = [
+  { id: 'Application', icon: <SettingsIcon /> },
+  { id: 'Execution', icon: <PlayIcon /> },
+  { id: 'Export', icon: <DownloadIcon /> },
+  { id: 'Units', icon: <RulerIcon /> },
+  { id: 'Workspace', icon: <StorageIcon /> },
+];
 
 export function SettingsDialog({ tab: initialTab, onClose }: { tab: SettingsTab; onClose: () => void }) {
   const [tab, setTab] = useState<SettingsTab>(initialTab);
@@ -43,18 +52,20 @@ export function SettingsDialog({ tab: initialTab, onClose }: { tab: SettingsTab;
   const x = DEFAULT_EXECUTION_SETTINGS;
 
   return (
-    <Dialog open title="Application settings" onClose={onClose} width={560} className="settings-dialog" actions={<button type="button" className="contained-button" onClick={onClose}>Close</button>}>
-      <div className="tabs" role="tablist">
-        {TABS.map((t) => (
-          <button key={t} type="button" role="tab" aria-selected={tab === t} className={`tab${tab === t ? ' active' : ''}`} onClick={() => setTab(t)}>
-            {t}
-          </button>
-        ))}
-      </div>
-      <div className="settings-body" role="tabpanel">
+    <Dialog open title="Application settings" onClose={onClose} width={720} className="settings-dialog" actions={<button type="button" className="contained-button" onClick={onClose}>Done</button>}>
+      <div className="settings-layout">
+        <div className="settings-nav" role="tablist" aria-orientation="vertical">
+          {TABS.map((t) => (
+            <button key={t.id} type="button" role="tab" aria-selected={tab === t.id} className={`settings-nav-item${tab === t.id ? ' active' : ''}`} onClick={() => setTab(t.id)}>
+              {t.icon}
+              <span>{t.id}</span>
+            </button>
+          ))}
+        </div>
+        <div className="settings-body" role="tabpanel">
         {tab === 'Application' && (
           <>
-            <Switch label="Show grid" sub="20-unit dot grid on the diagram canvas" checked={settings.showGrid} onChange={(v) => updateSettings({ showGrid: v })} />
+            <Switch label="Show grid" sub="20-unit line grid on the diagram canvas" checked={settings.showGrid} onChange={(v) => updateSettings({ showGrid: v })} />
             <Switch label="Enable snapping" sub="Snap moved components to the grid" checked={settings.snapping} onChange={(v) => updateSettings({ snapping: v })} />
             <Switch label="Enable dark mode (Public Beta)" checked={settings.darkMode} onChange={(v) => updateSettings({ darkMode: v })} />
             <Switch label="Exclude plots and stickies from dark mode" sub="Keeps the canvas, plots and stickies on a bright background" checked={settings.excludeCanvasFromDark} disabled={!settings.darkMode} onChange={(v) => updateSettings({ excludeCanvasFromDark: v })} />
@@ -118,6 +129,7 @@ export function SettingsDialog({ tab: initialTab, onClose }: { tab: SettingsTab;
           ) : (
             <p className="settings-note">Open a workspace to edit its name and description.</p>
           ))}
+        </div>
       </div>
     </Dialog>
   );

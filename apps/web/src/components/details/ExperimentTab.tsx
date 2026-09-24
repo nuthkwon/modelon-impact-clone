@@ -66,9 +66,11 @@ function ExperimentBrowser({ className, experiments, activeId }: { className: st
   return (
     <div className="exp-browser">
       <div className="section-title">Experiments</div>
-      {experiments.map((e) => (
-        <ExperimentRow key={e.id} exp={e} active={e.id === activeId} onlyOne={experiments.length <= 1} />
-      ))}
+      <div className="exp-list" role="listbox" aria-label="Experiments">
+        {experiments.map((e) => (
+          <ExperimentRow key={e.id} exp={e} active={e.id === activeId} onlyOne={experiments.length <= 1} />
+        ))}
+      </div>
       <button type="button" className="exp-new-link" onClick={() => createExperiment(className)}>
         <Icon.Add /> New experiment
       </button>

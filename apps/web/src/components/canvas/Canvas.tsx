@@ -183,7 +183,7 @@ export function Canvas(): JSX.Element {
 
       <div className="canvas-top">
         <ErrorBanners />
-        {readOnly && activeClass && <div className="canvas-chip read-only-chip">{libraryReadOnly ? 'Library class' : 'Read-only'}</div>}
+        {readOnly && activeClass && <div className="chip read-only-chip">{libraryReadOnly ? 'Library class' : 'Read-only'}</div>}
       </div>
 
       <div className="canvas-fabs">
@@ -195,10 +195,12 @@ export function Canvas(): JSX.Element {
       <TimeSlider />
 
       <div className="zoom-readout">
-        <span className="zoom-value">{Math.round(viewport.vp.scale * 100)}%</span>
-        <button className="chip zoom-fit" onClick={() => viewport.fit()} title="Fit to view (F)">
-          Fit
-        </button>
+        <div className="chip zoom-chip">
+          <span className="zoom-value">{Math.round(viewport.vp.scale * 100)}%</span>
+          <button className="zoom-fit" onClick={() => viewport.fit()} title="Fit to view (F)">
+            Fit
+          </button>
+        </div>
       </div>
     </div>
   );

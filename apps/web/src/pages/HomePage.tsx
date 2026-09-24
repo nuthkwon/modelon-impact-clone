@@ -57,7 +57,7 @@ function WorkspaceFormDialog({ title, submitLabel, initial, onSubmit, onClose }:
       width={460}
       actions={
         <>
-          <button type="button" className="text-button" onClick={onClose} disabled={busy}>
+          <button type="button" className="outlined-button" onClick={onClose} disabled={busy}>
             Cancel
           </button>
           <button type="button" className="contained-button" onClick={() => void submit()} disabled={busy || !name.trim()}>
@@ -166,7 +166,7 @@ export function HomePage({ navigate }: { navigate: (path: string) => void }) {
             </h1>
             <div className="home-toolbar">
               <Tooltip text="Not available in this clone">
-                <button type="button" className="text-button" disabled>
+                <button type="button" className="outlined-button" disabled>
                   Import workspace
                 </button>
               </Tooltip>
@@ -255,9 +255,7 @@ export function HomePage({ navigate }: { navigate: (path: string) => void }) {
                   }}
                   onContextMenu={(e) => rowMenu(e, ws)}
                 >
-                  <span className="ws-icon">
-                    <StorageIcon size={22} />
-                  </span>
+                  <span className="ws-icon" aria-hidden />
                   <span className="ws-main">
                     <div className="ws-name">{ws.definition.name}</div>
                     <div className="ws-desc">{ws.definition.description || 'No description'}</div>
@@ -272,6 +270,13 @@ export function HomePage({ navigate }: { navigate: (path: string) => void }) {
                 </div>
               ))}
             </div>
+          )}
+          {workspaces && (
+            <Tooltip text="Importing workspaces is not available in this clone">
+              <div className="home-dropzone" aria-disabled="true">
+                Drop a workspace ZIP here to import it
+              </div>
+            </Tooltip>
           )}
         </div>
       </main>

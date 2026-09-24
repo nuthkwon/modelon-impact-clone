@@ -15,7 +15,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactNode } from 'react';
 import { create } from 'zustand';
-import { CheckIcon } from '../icons';
+import { CheckIcon, OpenInNewIcon } from '../icons';
 import './common.css';
 
 export interface MenuItem {
@@ -34,6 +34,8 @@ export interface MenuItem {
   header?: boolean;
   /** Optional tooltip for the item (title attribute). */
   title?: string;
+  /** Opens something outside the app: shows an open-in-new icon at the right. */
+  external?: boolean;
 }
 
 interface ContextMenuState {
@@ -147,6 +149,11 @@ export function MenuList({ items, onClose, className, style, chrome = true, auto
             {item.icon !== undefined && <span className="menu-item-icon">{item.icon}</span>}
             <span className="menu-item-label">{item.label}</span>
             {item.shortcut && <span className="menu-item-shortcut">{item.shortcut}</span>}
+            {item.external && (
+              <span className="menu-item-trailing" aria-hidden>
+                <OpenInNewIcon size={18} />
+              </span>
+            )}
           </button>
         );
       })}

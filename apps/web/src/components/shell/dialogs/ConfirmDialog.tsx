@@ -17,7 +17,7 @@ export function ConfirmDialog() {
       zIndex={950}
       actions={
         <>
-          <button type="button" className="text-button" onClick={() => resolve(false)}>
+          <button type="button" className="outlined-button" onClick={() => resolve(false)}>
             {opts.cancelLabel ?? 'Cancel'}
           </button>
           <button type="button" className={`contained-button${opts.danger ? ' danger' : ''}`} data-autofocus onClick={() => resolve(true)}>

@@ -1,6 +1,6 @@
 /**
  * Screen-space overlays drawn on top of the (zoomed, y-flipped) diagram layer so that handle
- * sizes and label fonts stay in CSS pixels: component name labels, selection outlines with
+ * sizes and label fonts stay in CSS pixels: result-view frames, component name labels, selection outlines with
  * corner handles and the rotation handle, selected-connection corner handles, the rubber band
  * and the connection-target highlight.
  */
@@ -10,6 +10,7 @@ import { componentBounds, diagramToScreen, extentCorners, iconHasNameText, rotat
 import type { InteractionState } from './useInteractions';
 
 const HANDLE = 6;
+const FRAME_PAD = 4;
 const ROTATE_OFFSET = 14;
 const ROTATE_RADIUS = 6;
 
@@ -45,6 +46,25 @@ export function LabelsLayer({ components, vp, state }: { components: ComponentVi
             {c.name}
           </text>
         );
+      })}
+    </g>
+  );
+}
+
+/** Results mode (UI_SPEC §9 "Result view"): a dashed grey frame around each top-level component. */
+export function ResultFrames({ components, vp }: { components: ComponentView[]; vp: Viewport }) {
+  return (
+    <g className="result-frames" pointerEvents="none">
+      {components.map((c) => {
+        if (c.isConnector || c.placement.visible === false) return null;
+        const b = componentBounds(c);
+        const a = diagramToScreen(vp, b[0]);
+        const d = diagramToScreen(vp, b[1]);
+        const x = Math.round(Math.min(a[0], d[0]) - FRAME_PAD) + 0.5;
+        const y = Math.round(Math.min(a[1], d[1]) - FRAME_PAD) + 0.5;
+        const w = Math.round(Math.abs(d[0] - a[0]) + 2 * FRAME_PAD);
+        const h = Math.round(Math.abs(d[1] - a[1]) + 2 * FRAME_PAD);
+        return <rect key={c.name} className="result-frame" x={x} y={y} width={w} height={h} />;
       })}
     </g>
   );

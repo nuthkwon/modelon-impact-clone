@@ -1,7 +1,9 @@
 /**
- * Time slider (UI_SPEC §5.3) shown at the bottom-centre after a successful simulation:
- * play/pause (≈5 s for the full range), step back/forward (also ← / →), range input, numeric
- * time input with unit "s" and a case selector for multi-case results.
+ * Time slider card (UI_SPEC §5.3 / §9) shown at the bottom-centre after a successful
+ * simulation: line 1 "Current time: 23.4 s" (the number is an editable 600-weight input) with
+ * play/pause (≈5 s for the full range) and step buttons (also ← / →) at the right; line 2 the
+ * min label, the range input with the blue knob and the max label; a case selector for
+ * multi-case results.
  */
 import { useEffect, useState } from 'react';
 import { formatNumber } from '@impact/core';
@@ -89,45 +91,59 @@ export function TimeSlider() {
     setText(undefined);
   };
   const t = clamp(sliderTime);
+  const timeText = text ?? formatNumber(t, 6);
+  const multiCase = result.cases.length > 1;
 
   return (
-    <div className="time-slider" data-canvas-scroll>
-      <button className="icon-button" onClick={togglePlay} title={playing ? 'Pause' : 'Play'} aria-label={playing ? 'Pause' : 'Play'}>
-        {playing ? <Icon.Pause /> : <Icon.Play />}
-      </button>
-      <button className="icon-button" onClick={() => step(-1)} title="Step back (←)" aria-label="Step back">
-        <Icon.SkipPrevious />
-      </button>
-      <button className="icon-button" onClick={() => step(1)} title="Step forward (→)" aria-label="Step forward">
-        <Icon.SkipNext />
-      </button>
-      <input
-        className="time-range"
-        type="range"
-        min={start}
-        max={stop}
-        step={range / 1000}
-        value={t}
-        onChange={(e) => {
-          if (playing) setSliderPlaying(false);
-          setSliderTime(clamp(Number(e.target.value)));
-        }}
-        aria-label="Time"
-      />
-      <input
-        className="text-field time-input"
-        value={text ?? formatNumber(t, 6)}
-        onChange={(e) => setText(e.target.value)}
-        onFocus={() => setText(formatNumber(t, 6))}
-        onBlur={commitText}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') commitText();
-          else if (e.key === 'Escape') setText(undefined);
-        }}
-        aria-label="Current time"
-      />
-      <span className="time-unit">s</span>
-      {result.cases.length > 1 && (
+    <div className={`time-slider${multiCase ? ' multi-case' : ''}`} data-canvas-scroll data-testid="time-slider">
+      <div className="time-row">
+        <span className="time-label">
+          <span className="time-caption">Current time:</span>
+          <input
+            className="time-input"
+            style={{ width: `${Math.max(2, timeText.length) + 0.6}ch` }}
+            value={timeText}
+            onChange={(e) => setText(e.target.value)}
+            onFocus={() => setText(formatNumber(t, 6))}
+            onBlur={commitText}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') commitText();
+              else if (e.key === 'Escape') setText(undefined);
+            }}
+            aria-label="Current time"
+          />
+          <span className="time-unit">s</span>
+        </span>
+        <span className="time-controls">
+          <button className="icon-button time-play" onClick={togglePlay} title={playing ? 'Pause' : 'Play'} aria-label={playing ? 'Pause' : 'Play'}>
+            {playing ? <Icon.Pause /> : <Icon.Play />}
+          </button>
+          <button className="icon-button" onClick={() => step(-1)} title="Step back (←)" aria-label="Step back">
+            <Icon.SkipPrevious />
+          </button>
+          <button className="icon-button" onClick={() => step(1)} title="Step forward (→)" aria-label="Step forward">
+            <Icon.SkipNext />
+          </button>
+        </span>
+      </div>
+      <div className="time-row">
+        <span className="time-bound min">{formatNumber(start, 6)}</span>
+        <input
+          className="time-range"
+          type="range"
+          min={start}
+          max={stop}
+          step={range / 1000}
+          value={t}
+          onChange={(e) => {
+            if (playing) setSliderPlaying(false);
+            setSliderTime(clamp(Number(e.target.value)));
+          }}
+          aria-label="Time"
+        />
+        <span className="time-bound max">{formatNumber(stop, 6)}</span>
+      </div>
+      {multiCase && (
         <label className="case-slider">
           <span className="case-label">Case</span>
           <select value={Math.min(caseIndex, result.cases.length - 1)} onChange={(e) => setCaseIndex(Number(e.target.value))} aria-label="Case">

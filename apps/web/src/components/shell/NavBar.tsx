@@ -5,7 +5,7 @@ import { useState } from 'react';
 import type { JSX, MouseEvent as ReactMouseEvent } from 'react';
 import { useStore } from '../../store';
 import type { Mode, View } from '../../store/types';
-import { AppsIcon, CodeIcon, DescriptionIcon, DiagramIcon, ExperimentIcon, HelpIcon, ResultsIcon, SettingsIcon, StorageIcon } from '../icons';
+import { AppsIcon, CodeIcon, DiagramIcon, ExpandMoreIcon, ExperimentIcon, HelpIcon, ResultsIcon, SettingsIcon } from '../icons';
 import { MenuList } from '../common/ContextMenu';
 import type { MenuItem } from '../common/ContextMenu';
 import { Popover } from '../common/Popover';
@@ -47,9 +47,14 @@ export function NavBar({ navigate, home, onWorkspaceManagement }: NavBarProps) {
   };
   const closeMenu = () => setMenu(null);
 
+  // Grouped like Impact's Apps menu: uppercase group headers, external items carry an open-in-new icon.
   const appsItems: MenuItem[] = [
-    { label: 'Workspace Management', icon: <StorageIcon />, onSelect: onWorkspaceManagement ?? (() => shell.openWorkspaceManagement()) },
-    { label: 'Documentation', icon: <DescriptionIcon />, onSelect: () => shell.openDocs() },
+    { label: 'Workspace Management', header: true },
+    { label: 'Workspace Configuration', onSelect: onWorkspaceManagement ?? (() => shell.openWorkspaceManagement()) },
+    { label: 'General Apps', header: true },
+    { label: 'Documentation', external: true, onSelect: () => shell.openDocs() },
+    { label: 'Tools - Advanced', header: true },
+    { label: 'Server Management', onSelect: () => shell.openAbout() },
   ];
   const helpItems: MenuItem[] = [
     { label: 'Documentation', onSelect: () => shell.openDocs() },
@@ -59,6 +64,7 @@ export function NavBar({ navigate, home, onWorkspaceManagement }: NavBarProps) {
     { label: 'About', onSelect: () => shell.openAbout() },
   ];
   const userItems: MenuItem[] = [{ label: 'User', header: true }, { label: 'Sign out', disabled: true, title: 'Not available in this clone' }];
+  const menuWidth = menu?.kind === 'apps' ? 250 : 220;
 
   const modes: { mode: Mode; icon: JSX.Element; kind: string; label: string; tooltip: string }[] = [
     { mode: 'model', icon: <DiagramIcon />, kind: 'Model', label: shortName(activeClass) ?? 'Model', tooltip: 'Model mode (1)' },
@@ -112,26 +118,30 @@ export function NavBar({ navigate, home, onWorkspaceManagement }: NavBarProps) {
 
       <div className="navbar-right">
         {!home && (
-          <div className="view-toggle" role="group" aria-label="View">
-            {views.map((v) => (
-              <Tooltip key={v.view} text={v.label}>
-                <button
-                  type="button"
-                  className={`${view === v.view ? 'active' : ''}${v.disabled ? ' disabled' : ''}`}
-                  aria-pressed={view === v.view}
-                  aria-disabled={v.disabled || undefined}
-                  aria-label={v.label}
-                  onClick={() => !v.disabled && setView(v.view)}
-                >
-                  {v.icon}
-                </button>
-              </Tooltip>
-            ))}
-          </div>
+          <>
+            <div className="view-toggle" role="group" aria-label="View">
+              {views.map((v) => (
+                <Tooltip key={v.view} text={v.label}>
+                  <button
+                    type="button"
+                    className={`${view === v.view ? 'active' : ''}${v.disabled ? ' disabled' : ''}`}
+                    aria-pressed={view === v.view}
+                    aria-disabled={v.disabled || undefined}
+                    aria-label={v.label}
+                    onClick={() => !v.disabled && setView(v.view)}
+                  >
+                    {v.icon}
+                  </button>
+                </Tooltip>
+              ))}
+            </div>
+            <span className="navbar-divider" role="separator" />
+          </>
         )}
         <Tooltip text="Apps">
-          <button type="button" className={`icon-button${menu?.kind === 'apps' ? ' open' : ''}`} aria-label="Apps" aria-haspopup="menu" onClick={toggleMenu('apps')}>
+          <button type="button" className={`icon-button navbar-apps${menu?.kind === 'apps' ? ' open' : ''}`} aria-label="Apps" aria-haspopup="menu" onClick={toggleMenu('apps')}>
             <AppsIcon />
+            <ExpandMoreIcon className="navbar-caret" />
           </button>
         </Tooltip>
         {!home && (
@@ -141,11 +151,13 @@ export function NavBar({ navigate, home, onWorkspaceManagement }: NavBarProps) {
             </button>
           </Tooltip>
         )}
+        <span className="navbar-divider" role="separator" />
         <Tooltip text="Help">
           <button type="button" className={`icon-button${menu?.kind === 'help' ? ' open' : ''}`} aria-label="Help" aria-haspopup="menu" onClick={toggleMenu('help')}>
             <HelpIcon />
           </button>
         </Tooltip>
+        <span className="navbar-divider" role="separator" />
         <Tooltip text="User">
           <button type="button" className={`icon-button avatar-button${menu?.kind === 'user' ? ' open' : ''}`} aria-label="User menu" aria-haspopup="menu" onClick={toggleMenu('user')}>
             <span className="avatar">U</span>
@@ -154,7 +166,7 @@ export function NavBar({ navigate, home, onWorkspaceManagement }: NavBarProps) {
       </div>
 
       <Popover anchor={menu?.anchor} open={menu !== null} onClose={closeMenu} placement="bottom-end">
-        {menu && <MenuList chrome={false} items={menu.kind === 'apps' ? appsItems : menu.kind === 'help' ? helpItems : userItems} onClose={closeMenu} style={{ minWidth: 220, padding: '4px 0' }} />}
+        {menu && <MenuList chrome={false} items={menu.kind === 'apps' ? appsItems : menu.kind === 'help' ? helpItems : userItems} onClose={closeMenu} style={{ minWidth: menuWidth, padding: '6px 0' }} />}
       </Popover>
     </header>
   );

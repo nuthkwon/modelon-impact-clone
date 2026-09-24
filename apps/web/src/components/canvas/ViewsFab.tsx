@@ -1,6 +1,6 @@
 /**
- * Views floating action button (UI_SPEC §5.2): saves/restores the plots & stickies of the
- * active class as named views and clears the canvas objects.
+ * Views floating action button (UI_SPEC §5.2 / §9: 44px white disc, orange eye): saves/restores
+ * the plots & stickies of the active class as named views and clears the canvas objects.
  */
 import { useState } from 'react';
 import { useStore } from '../../store';
@@ -9,6 +9,18 @@ import { Tooltip } from '../common/Tooltip';
 import { Icon } from '../icons';
 
 const EMPTY: never[] = [];
+
+/** Filled orange eye with a white iris ring (the Views FAB glyph in Impact). */
+function EyeGlyph() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path fill="currentColor" d="M12 5.5C7.2 5.5 3.1 8.3 1.4 12.25 3.1 16.2 7.2 19 12 19s8.9-2.8 10.6-6.75C20.9 8.3 16.8 5.5 12 5.5z" />
+      <circle className="glyph-surface" cx="12" cy="12.25" r="4.7" />
+      <circle cx="12" cy="12.25" r="3" fill="currentColor" />
+      <circle className="glyph-surface" cx="13.5" cy="10.9" r="0.9" />
+    </svg>
+  );
+}
 
 export function ViewsFab() {
   const activeClass = useStore((s) => s.activeClass);
@@ -37,8 +49,10 @@ export function ViewsFab() {
     <div className={`fab-group views-fab-group${menuOpen ? ' open' : ''}`} onMouseLeave={() => setMenuOpen(false)}>
       <div className="fab-stack">
         <Tooltip text="Views" placement="left">
-          <button className="fab views-fab" aria-label="Views" disabled={!activeClass} onClick={() => setMenuOpen((o) => !o)}>
-            <Icon.Eye />
+          <button className="fab views-fab" data-testid="views-fab" aria-label="Views" disabled={!activeClass} onClick={() => setMenuOpen((o) => !o)}>
+            <span className="fab-icon">
+              <EyeGlyph />
+            </span>
           </button>
         </Tooltip>
         <div className="fab-menu menu" role="menu">

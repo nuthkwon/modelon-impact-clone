@@ -47,8 +47,8 @@ export function ConfigureWorkspaceDialog({ open, onClose }: { open: boolean; onC
       open={open}
       onClose={onClose}
       actions={
-        <button type="button" className="text-button" onClick={onClose}>
-          Close
+        <button type="button" className="contained-button" onClick={onClose}>
+          Done
         </button>
       }
     >

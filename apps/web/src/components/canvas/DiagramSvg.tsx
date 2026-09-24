@@ -1,8 +1,8 @@
 /**
  * The SVG scene of the model canvas. Root group `matrix(s 0 0 -s tx ty)` maps Modelica
- * y-up diagram coordinates to the screen; inside it: optional dot grid, the class's own
+ * y-up diagram coordinates to the screen; inside it: optional line grid, the class's own
  * Diagram-layer graphics, connections, components (with ports) and the connection preview.
- * Screen-space overlays (labels, selection, rubber band) live in a sibling group.
+ * Screen-space overlays (result frames, labels, selection, rubber band) live in a sibling group.
  */
 import { useCallback, useId, useMemo, useRef, useState } from 'react';
 import type { MutableRefObject } from 'react';
@@ -13,7 +13,7 @@ import { GraphicsItems, polyPath } from '../graphics/GraphicsLayerSvg';
 import { CanvasTooltip, type TooltipState } from './CanvasTooltip';
 import { ComponentNode } from './ComponentNode';
 import { ConnectionPath } from './ConnectionPath';
-import { ConnectTargetHighlight, LabelsLayer, RubberBand, SelectionLayer } from './SelectionLayer';
+import { ConnectTargetHighlight, LabelsLayer, ResultFrames, RubberBand, SelectionLayer } from './SelectionLayer';
 import { collectPortAnchors, domainColor, GRID_STEP, orthogonalRoute, snapDelta, visibleExtent, type ConnectorInfo } from './geometry';
 import { useInteractions, type InteractionApi, type InteractionState } from './useInteractions';
 import type { ViewportApi } from './useViewport';
@@ -71,6 +71,7 @@ export function DiagramSvg({ diagram, viewport, readOnly, showGrid, interactions
   const selection = useStore((s) => s.selection) ?? EMPTY_SELECTION;
   const selectedConnection = useStore((s) => s.selectedConnection);
   const snapping = useStore((s) => s.settings.snapping);
+  const mode = useStore((s) => s.mode);
   const registryVersion = useStore((s) => s.registryVersion);
   const [tooltip, setTooltip] = useState<TooltipState | undefined>(undefined);
   const onTooltip = useCallback((tip: TooltipState | undefined) => setTooltip(tip), []);
@@ -111,12 +112,14 @@ export function DiagramSvg({ diagram, viewport, readOnly, showGrid, interactions
         {...api.handlers}
       >
         <defs>
+          {/* One vertical + one horizontal 1px line per 20-unit cell; the half-cell offset puts them on multiples of 20. */}
           <pattern id={gridId} x={-GRID_STEP / 2} y={-GRID_STEP / 2} width={GRID_STEP} height={GRID_STEP} patternUnits="userSpaceOnUse">
-            <circle className="grid-dot" cx={GRID_STEP / 2} cy={GRID_STEP / 2} r={Math.max(0.4, 1 / vp.scale)} />
+            <path className="grid-line" d={`M${GRID_STEP / 2} 0V${GRID_STEP}M0 ${GRID_STEP / 2}H${GRID_STEP}`} vectorEffect="non-scaling-stroke" />
           </pattern>
         </defs>
         <g className="diagram-root" transform={matrixToSvg(viewport.matrix)}>
           {grid && <rect className="grid-fill" x={grid[0][0]} y={grid[0][1]} width={grid[1][0] - grid[0][0]} height={grid[1][1] - grid[0][1]} fill={`url(#${gridId})`} pointerEvents="none" />}
+          {grid && <circle className="grid-origin" cx={0} cy={0} r={1.5 / vp.scale} pointerEvents="none" />}
           {diagram && (
             <>
               <g className="diagram-graphics" pointerEvents="none">
@@ -159,6 +162,7 @@ export function DiagramSvg({ diagram, viewport, readOnly, showGrid, interactions
         </g>
         {diagram && (
           <g className="screen-layer">
+            {mode === 'results' && <ResultFrames components={diagram.components} vp={vp} />}
             <LabelsLayer components={diagram.components} vp={vp} state={displayState} />
             <SelectionLayer components={diagram.components} selection={selection} selectedConnection={connection} vp={vp} state={displayState} readOnly={readOnly} />
             <RubberBand state={displayState} vp={vp} />

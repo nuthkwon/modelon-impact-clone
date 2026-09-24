@@ -4,8 +4,8 @@
     "format": "1.0.0",
     "content": [
       {
-        "id": "cnt_7ezty7bojs",
-        "relpath": "Examples.mo",
+        "id": "cnt_pvdts0yrey",
+        "relpath": "Examples/",
         "contentType": "MODELICA",
         "name": "Examples",
         "defaultDisabled": false,

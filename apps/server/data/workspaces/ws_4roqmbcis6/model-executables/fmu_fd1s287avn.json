@@ -1,0 +1,35 @@
+{
+  "id": "fmu_fd1s287avn",
+  "input": {
+    "className": "Examples.RCCircuit",
+    "compilerOptions": {
+      "c_compiler": "gcc",
+      "generate_html_diagnostics": false,
+      "include_protected_variables": false,
+      "filter_warnings": false
+    },
+    "runtimeOptions": {
+      "log_level": 3
+    },
+    "compilerLogLevel": "warning",
+    "fmiTarget": "me",
+    "fmiVersion": "2.0",
+    "platform": "auto"
+  },
+  "run_info": {
+    "status": "successful",
+    "datetime_started": "2026-09-24T07:23:17.714Z",
+    "datetime_finished": "2026-09-24T07:23:17.732Z",
+    "errors": [],
+    "warnings": []
+  },
+  "statistics": {
+    "components": 4,
+    "unknowns": 23,
+    "equations": 23,
+    "parameters": 8,
+    "constants": 0,
+    "states": 1,
+    "connections": 4
+  }
+}

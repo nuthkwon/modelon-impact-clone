@@ -232,7 +232,10 @@ describe('Canvas rendering', () => {
     expect(html).not.toContain('>hidden<');
     expect(html).toContain('class="sticky"');
     expect(html).toContain('resistor.v');
-    expect(html).toContain('class="sticky-value">–<');
+    expect(html).toContain('class="value-chip sticky-value">–<');
+    // grouped card: the component name is the title, the row shows the short variable name
+    expect(html).toContain('class="sticky-title-text">resistor<');
+    expect(html).toContain('class="sticky-var">v<');
   });
 
   it('renders the execution FAB as idle for a model and the zoom readout', () => {

@@ -1,7 +1,8 @@
 /**
- * Floating plot window (docs/UI_SPEC.md §5.5): 28px toolbar with drag handle, editable
- * title, legend / settings / pin / close buttons, an SVG chart body with "Y axis" / "X axis"
- * drop zones for variable drags, a bottom legend and a resize handle. Rendered by the canvas
+ * Floating plot window (docs/UI_SPEC.md §5.5 / §9): 32px toolbar with drag handle, editable
+ * 600-weight title, legend / settings / pin / close buttons, an SVG chart body with "Y axis" /
+ * "X axis" drop zones for variable drags, a legend column at the right grouped by component
+ * (hover highlights the trace, click hides it) and a resize handle. Rendered by the canvas
  * module inside its `position: relative` container.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -16,6 +17,7 @@ import { unitOf, useCaseMeta } from '../results/resultMeta';
 import { PlotChart } from './PlotChart';
 import type { ChartSeries } from './PlotChart';
 import { usePlotSeries } from './usePlotSeries';
+import type { ResolvedSeries } from './usePlotSeries';
 import { hasVariableDrag, readVariableDrag } from './dragTypes';
 import './plots.css';
 
@@ -24,10 +26,43 @@ export type { VariableDragPayload } from './dragTypes';
 
 export const PLOT_MIN_WIDTH = 240;
 export const PLOT_MIN_HEIGHT = 160;
-const TOOLBAR_HEIGHT = 28;
+const TOOLBAR_HEIGHT = 32;
 const X_ZONE_HEIGHT = 24;
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), Math.max(lo, hi));
+const shortName = (name: string) => name.split('.').pop() ?? name;
+
+export interface LegendItem {
+  series: ResolvedSeries;
+  /** Row text: the variable without its component prefix plus any `[case]` / `[Result]` suffix. */
+  name: string;
+}
+export interface LegendGroup {
+  /** Component name, or the model's short class name for top-level variables. */
+  name: string;
+  items: LegendItem[];
+}
+
+/** Legend rows grouped by component (first dotted segment); top-level variables belong to the model itself. */
+export function legendGroups(series: ResolvedSeries[], className: string): LegendGroup[] {
+  const model = shortName(className);
+  const groups = new Map<string, LegendGroup>();
+  for (const s of series) {
+    const v = s.variable;
+    const suffix = s.label.startsWith(v) ? s.label.slice(v.length) : '';
+    const dot = /^der\(/.test(v) ? -1 : v.indexOf('.');
+    const groupName = dot > 0 ? v.slice(0, dot) : model;
+    const name = s.label.startsWith(v) ? (dot > 0 ? v.slice(dot + 1) : v) + suffix : s.label;
+    let g = groups.get(groupName);
+    if (!g) {
+      g = { name: groupName, items: [] };
+      groups.set(groupName, g);
+    }
+    g.items.push({ series: s, name });
+  }
+  // the model's own variables first, then components in first-seen order
+  return [...groups.values()].sort((a, b) => (a.name === model ? -1 : b.name === model ? 1 : 0));
+}
 
 /** Closes a popup on outside pointerdown / Escape. */
 function useDismiss(open: boolean, refs: RefObject<HTMLElement | null>[], onClose: () => void) {
@@ -101,6 +136,7 @@ export function PlotWindowView({ className, plot, canvasRef }: PlotWindowViewPro
   const [dragZone, setDragZone] = useState<'x' | 'y' | null>(null);
   const dragDepth = useRef(0);
   const [colorMenu, setColorMenu] = useState<{ traceIndex: number; left: number; top: number } | null>(null);
+  const [hoverId, setHoverId] = useState<string | undefined>(undefined);
 
   useEffect(() => setXDraft(plot.xVariable), [plot.xVariable]);
   useEffect(() => {
@@ -286,6 +322,8 @@ export function PlotWindowView({ className, plot, canvasRef }: PlotWindowViewPro
     [resolved, meta],
   );
   const emptyText = plot.traces.length === 0 ? 'Drag a variable here' : loading ? 'Loading…' : error ? 'Failed to load data' : 'No data';
+  const groups = useMemo(() => legendGroups(resolved, className), [resolved, className]);
+  const modelName = shortName(className);
   const datalistId = `plot-xvars-${plot.id}`;
 
   return (
@@ -355,73 +393,90 @@ export function PlotWindowView({ className, plot, canvasRef }: PlotWindowViewPro
       </div>
 
       <div ref={bodyRef} className="plot-body">
-        <PlotChart
-          series={series}
-          xLabel={xAxisLabel}
-          logY={plot.logY}
-          showGrid={plot.showGrid}
-          cursorTime={isTime ? sliderTime : undefined}
-          onCursorChange={isTime ? setSliderTime : undefined}
-          emptyText={emptyText}
-        />
-        {dragZone && (
-          <>
-            <div className={`plot-dropzone y${dragZone === 'y' ? ' active' : ''}`}>
-              <span>Y axis</span>
+        <div className="plot-chart-wrap">
+          <PlotChart
+            series={series}
+            xLabel={xAxisLabel}
+            logY={plot.logY}
+            showGrid={plot.showGrid}
+            cursorTime={isTime ? sliderTime : undefined}
+            onCursorChange={isTime ? setSliderTime : undefined}
+            highlightId={hoverId}
+            emptyText={emptyText}
+          />
+          {dragZone && (
+            <>
+              <div className={`plot-dropzone y${dragZone === 'y' ? ' active' : ''}`}>
+                <span>Y axis</span>
+              </div>
+              <div className={`plot-dropzone x${dragZone === 'x' ? ' active' : ''}`} style={{ height: X_ZONE_HEIGHT }}>
+                <span>X axis</span>
+              </div>
+            </>
+          )}
+        </div>
+
+        {plot.showLegend && resolved.length > 0 && (
+          <div className="plot-legend" role="list" aria-label="Legend" onMouseLeave={() => setHoverId(undefined)}>
+            <div className="plot-legend-model" title={className}>
+              {modelName}
             </div>
-            <div className={`plot-dropzone x${dragZone === 'x' ? ' active' : ''}`} style={{ height: X_ZONE_HEIGHT }}>
-              <span>X axis</span>
-            </div>
-          </>
+            {groups.map((g) => (
+              <div key={g.name} className="plot-legend-section">
+                {g.name !== modelName && (
+                  <div className="plot-legend-group" title={g.name}>
+                    {g.name}
+                  </div>
+                )}
+                {g.items.map(({ series: s, name }) => (
+                  <div
+                    key={s.id}
+                    role="listitem"
+                    className={`plot-legend-item${s.hidden ? ' hidden' : ''}${s.status !== 'ready' ? ` ${s.status}` : ''}`}
+                    onClick={() => toggleTrace(s.traceIndex)}
+                    onContextMenu={(e) => onLegendContext(s.traceIndex, e)}
+                    onMouseEnter={() => setHoverId(s.id)}
+                    onMouseLeave={() => setHoverId((cur) => (cur === s.id ? undefined : cur))}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        toggleTrace(s.traceIndex);
+                      } else if (e.key === 'Delete') removeTraceAt(s.traceIndex);
+                    }}
+                    tabIndex={0}
+                    title={`${s.label}\n${s.hidden ? 'Click to show' : 'Click to hide'}`}
+                  >
+                    <button
+                      type="button"
+                      className="plot-legend-dot"
+                      style={{ background: s.color }}
+                      aria-label={`Change colour of ${s.label}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openColorMenu(s.traceIndex, e);
+                      }}
+                      onPointerDown={(e) => e.stopPropagation()}
+                    />
+                    <span className="plot-legend-label">{name}</span>
+                    {s.status === 'loading' && <span className="plot-legend-status">…</span>}
+                    <button
+                      type="button"
+                      className="plot-legend-remove"
+                      aria-label={`Remove ${s.label}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeTraceAt(s.traceIndex);
+                      }}
+                    >
+                      <Icon.Close />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
         )}
       </div>
-
-      {plot.showLegend && resolved.length > 0 && (
-        <div className="plot-legend" role="list">
-          {resolved.map((s) => (
-            <div
-              key={s.id}
-              role="listitem"
-              className={`plot-legend-item${s.hidden ? ' hidden' : ''}${s.status !== 'ready' ? ` ${s.status}` : ''}`}
-              onClick={() => toggleTrace(s.traceIndex)}
-              onContextMenu={(e) => onLegendContext(s.traceIndex, e)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  toggleTrace(s.traceIndex);
-                } else if (e.key === 'Delete') removeTraceAt(s.traceIndex);
-              }}
-              tabIndex={0}
-              title={s.hidden ? 'Click to show' : 'Click to hide'}
-            >
-              <button
-                type="button"
-                className="plot-legend-dot"
-                style={{ background: s.color }}
-                aria-label={`Change colour of ${s.label}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  openColorMenu(s.traceIndex, e);
-                }}
-                onPointerDown={(e) => e.stopPropagation()}
-              />
-              <span className="plot-legend-label">{s.label}</span>
-              {s.status === 'loading' && <span className="plot-legend-status">…</span>}
-              <button
-                type="button"
-                className="plot-legend-remove"
-                aria-label={`Remove ${s.label}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  removeTraceAt(s.traceIndex);
-                }}
-              >
-                <Icon.Close />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
 
       {settingsOpen && (
         <div ref={settingsRef} className="plot-settings" role="dialog" aria-label="Plot settings">

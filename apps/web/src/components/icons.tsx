@@ -92,6 +92,7 @@ export const FunctionIcon = make('Function', 'M14.5 3c-1.9 0-3.1 1.1-3.5 3.2L10.
 export const TableIcon = make('Table', 'M20 3H5C3.9 3 3 3.9 3 5v14c0 1.1.9 2 2 2h15c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 2v3H5V5h15zm-5 14h-5v-9h5v9zM5 10h3v9H5v-9zm12 9v-9h3v9h-3z');
 export const TypeIcon = make('Type', 'M5 4v3h5.5v12h3V7H19V4z');
 export const ConnectorIcon = make('Connector', 'M6 6h12v12H6z');
+export const RulerIcon = make('Ruler', 'M21 6H3c-1.1 0-2 .9-2 2v8c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 10H3V8h2v4h2V8h2v4h2V8h2v4h2V8h2v4h2V8h2v8z');
 export const SlidersIcon = ExperimentIcon;
 
 /** Namespace object: `Icon.Play`, `Icon.Settings`, ... */
@@ -158,6 +159,7 @@ export const Icon = {
   Table: TableIcon,
   Type: TypeIcon,
   Connector: ConnectorIcon,
+  Ruler: RulerIcon,
 } as const;
 
 export type IconName = keyof typeof Icon;

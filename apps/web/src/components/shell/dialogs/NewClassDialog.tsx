@@ -194,7 +194,7 @@ export function NewClassDialog({ parent, onClose }: { parent?: string; onClose: 
       width={520}
       actions={
         <>
-          <button type="button" className="text-button" onClick={onClose} disabled={busy}>
+          <button type="button" className="outlined-button" onClick={onClose} disabled={busy}>
             Cancel
           </button>
           <button type="button" className="contained-button" onClick={() => void submit()} disabled={busy || !name.trim()}>

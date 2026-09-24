@@ -1,0 +1,60 @@
+{
+  "id": "exp_xdsz1q9byj",
+  "experiment": {
+    "version": 2,
+    "base": {
+      "model": {
+        "modelica": {
+          "className": "Examples.RCCircuit",
+          "compilerOptions": {
+            "c_compiler": "gcc",
+            "generate_html_diagnostics": false,
+            "include_protected_variables": false,
+            "filter_warnings": false
+          },
+          "runtimeOptions": {
+            "log_level": 3
+          },
+          "compilerLogLevel": "warning",
+          "fmiTarget": "me",
+          "fmiVersion": "2.0",
+          "platform": "auto"
+        }
+      },
+      "modifiers": {
+        "variables": {}
+      },
+      "analysis": {
+        "type": "dynamic",
+        "parameters": {
+          "start_time": 0,
+          "final_time": 5
+        },
+        "simulationOptions": {
+          "ncp": 1000,
+          "dynamic_diagnostics": false,
+          "store_event_points": true
+        },
+        "solverOptions": {
+          "solver": "CVode",
+          "rtol": 0.000001,
+          "atol": 0.000001
+        },
+        "simulationLogLevel": "WARNING"
+      }
+    },
+    "extensions": []
+  },
+  "meta_data": {
+    "label": "Result1",
+    "created_at": "2026-09-24T07:23:17.754Z"
+  },
+  "run_info": {
+    "status": "done",
+    "failed": 1,
+    "successful": 0,
+    "cancelled": 0,
+    "not_started": 0
+  },
+  "className": "Examples.RCCircuit"
+}

@@ -49,7 +49,7 @@ export function NameDialog(props: NameDialogProps) {
       onClose={props.onClose}
       actions={
         <>
-          <button type="button" className="text-button" onClick={props.onClose} disabled={props.busy}>
+          <button type="button" className="outlined-button" onClick={props.onClose} disabled={props.busy}>
             Cancel
           </button>
           <button type="button" className="contained-button" onClick={submit} disabled={!!error || props.busy}>
