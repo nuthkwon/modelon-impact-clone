@@ -126,6 +126,9 @@ export function MenuList({ items, onClose, className, style, chrome = true, auto
     }
   };
 
+  // Keep labels aligned when only some items carry an icon.
+  const hasIcons = items.some((item) => !item.separator && !item.header && item.icon !== undefined);
+
   return (
     <div ref={ref} role="menu" className={`${chrome ? 'menu ' : ''}menu-list${className ? ` ${className}` : ''}`} style={style} onKeyDown={onKeyDown}>
       {items.map((item, i) => {
@@ -146,7 +149,7 @@ export function MenuList({ items, onClose, className, style, chrome = true, auto
             }}
           >
             {item.checked !== undefined && <span className="menu-item-check">{item.checked ? <CheckIcon size={16} /> : null}</span>}
-            {item.icon !== undefined && <span className="menu-item-icon">{item.icon}</span>}
+            {(item.icon !== undefined || hasIcons) && <span className="menu-item-icon">{item.icon}</span>}
             <span className="menu-item-label">{item.label}</span>
             {item.shortcut && <span className="menu-item-shortcut">{item.shortcut}</span>}
             {item.external && (

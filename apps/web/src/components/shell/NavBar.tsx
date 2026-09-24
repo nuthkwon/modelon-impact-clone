@@ -107,7 +107,7 @@ export function NavBar({ navigate, home, onWorkspaceManagement }: NavBarProps) {
               <Tooltip key={m.mode} text={m.tooltip}>
                 <button type="button" role="tab" aria-selected={mode === m.mode} className={`mode-button${mode === m.mode ? ' active' : ''}`} onClick={() => setMode(m.mode)}>
                   {m.icon}
-                  {m.label !== m.kind && <span className="mode-kind">{m.kind}:</span>}
+                  {false && <span className="mode-kind">{m.kind}:</span>}
                   <span className="mode-label">{m.label}</span>
                 </button>
               </Tooltip>

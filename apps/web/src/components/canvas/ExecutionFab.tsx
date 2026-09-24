@@ -45,7 +45,7 @@ export function ExecutionFab() {
   const canSimulate = !!def && !def.partial && (def.restriction === 'model' || def.restriction === 'block' || def.restriction === 'class');
   const isRunning = !!running && running.className === activeClass;
   const busy = !!running;
-  const done = !isRunning && !!activeResult && activeResult.status !== 'running';
+  const done = !isRunning && !!activeResult && (activeResult.status === 'successful' || activeResult.status === 'partial');
 
   const phaseLabel = isRunning
     ? running.phase === 'compiling'
