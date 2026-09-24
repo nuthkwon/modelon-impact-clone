@@ -1,0 +1,12 @@
+node_modules/
+dist/
+dist-types/
+*.tsbuildinfo
+.vite/
+coverage/
+test-results/
+playwright-report/
+apps/server/data/*.json
+!apps/server/data/.gitkeep
+.DS_Store
+*.log

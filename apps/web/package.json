@@ -1,0 +1,34 @@
+{
+  "name": "@impact/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@impact/core": "*",
+    "@impact/protocol": "*",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "zustand": "^5.0.5",
+    "codemirror": "^6.0.1",
+    "@codemirror/language": "^6.11.0",
+    "@codemirror/state": "^6.5.0",
+    "@codemirror/view": "^6.36.0",
+    "@codemirror/commands": "^6.8.0",
+    "@codemirror/search": "^6.5.0",
+    "@codemirror/autocomplete": "^6.18.0",
+    "@lezer/highlight": "^1.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@vitejs/plugin-react": "^4.5.0",
+    "vite": "^7.0.0",
+    "@playwright/test": "^1.53.0"
+  }
+}

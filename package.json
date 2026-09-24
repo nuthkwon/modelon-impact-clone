@@ -1,0 +1,30 @@
+{
+  "name": "modelon-impact-clone",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Browser-based Modelica system modeling & simulation platform (Modelon Impact clone)",
+  "license": "MIT",
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=20.19"
+  },
+  "scripts": {
+    "dev": "concurrently -n server,web -c blue,green \"npm run dev -w apps/server\" \"npm run dev -w apps/web\"",
+    "build": "npm run build -w packages/core && npm run build -w packages/protocol && npm run build -w apps/server && npm run build -w apps/web",
+    "start": "npm run start -w apps/server",
+    "test": "vitest run",
+    "typecheck": "tsc -b packages/core packages/protocol apps/server apps/web",
+    "lint": "tsc -b packages/core packages/protocol apps/server apps/web --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "concurrently": "^9.1.2",
+    "typescript": "~5.9.0",
+    "vitest": "^3.2.0",
+    "tsx": "^4.20.0"
+  }
+}
