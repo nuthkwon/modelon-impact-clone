@@ -6,7 +6,7 @@ dist-types/
 coverage/
 test-results/
 playwright-report/
-apps/server/data/*.json
+apps/server/data/*
 !apps/server/data/.gitkeep
 .DS_Store
 *.log
