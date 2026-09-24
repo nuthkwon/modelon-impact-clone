@@ -14,6 +14,7 @@ import {
   padDomain,
   panDomain,
   roundToStep,
+  wheelZoom,
   zoomDomain,
 } from './chartMath';
 
@@ -197,5 +198,78 @@ describe('nearest / interpolate', () => {
     expect(isMonotonic([0, 0, 1, 2])).toBe(true);
     expect(isMonotonic([0, 2, 1])).toBe(false);
     expect(isMonotonic([])).toBe(true);
+  });
+});
+
+describe('precision for tiny ranges around a large offset', () => {
+  it('keeps tick values and labels distinct and increasing inside the range', () => {
+    const lo = -9.806650000000005;
+    const hi = -9.80665;
+    const t = linearTicks(lo, hi, 6);
+    expect(t.length).toBeGreaterThanOrEqual(3);
+    const values = t.map((x) => x.value);
+    const labels = t.map((x) => x.label);
+    expect(new Set(values).size).toBe(values.length);
+    expect(new Set(labels).size).toBe(labels.length);
+    for (let i = 1; i < values.length; i++) expect(values[i]).toBeGreaterThan(values[i - 1]);
+    for (const v of values) {
+      expect(v).toBeGreaterThanOrEqual(lo - 1e-14);
+      expect(v).toBeLessThanOrEqual(hi + 1e-14);
+    }
+    for (const l of labels) expect(l).not.toBe('-9.80665');
+  });
+  it('shows enough exponent digits for a narrow range of large values', () => {
+    const t = linearTicks(2500000, 2501000, 6);
+    expect(t.map((x) => x.label)).toEqual(['2.5e6', '2.5002e6', '2.5004e6', '2.5006e6', '2.5008e6', '2.501e6']);
+  });
+  it('does not round sub-1e-15 ticks to zero', () => {
+    const t = linearTicks(1e-17, 5e-17, 6);
+    expect(t.map((x) => x.value)).toEqual([1e-17, 2e-17, 3e-17, 4e-17, 5e-17]);
+    expect(t.map((x) => x.label)).toEqual(['1e-17', '2e-17', '3e-17', '4e-17', '5e-17']);
+  });
+  it('derives the label precision from the step', () => {
+    expect(formatTick(2500200, 200)).toBe('2.5002e6');
+    expect(formatTick(2500000, 200)).toBe('2.5e6');
+    expect(formatTick(283.152, 0.002)).toBe('283.152');
+    expect(formatTick(3e-17, 1e-17)).toBe('3e-17');
+    expect(formatTick(1e6, 1e6)).toBe('1e6');
+    expect(roundToStep(3e-17, 1e-17)).toBe(3e-17);
+    expect(roundToStep(-9.806650000000004, 1e-15)).toBe(-9.806650000000004);
+  });
+  it('pads a span within floating-point noise like a constant, and a real span proportionally', () => {
+    const d = padDomain([-9.806650000000005, -9.80665], 0.05);
+    expect(d[0]).toBeLessThan(-10);
+    expect(d[1]).toBeGreaterThan(-9.5);
+    const [lo, hi] = padDomain([283.15, 283.16], 0.05);
+    expect(lo).toBeCloseTo(283.1495, 9);
+    expect(hi).toBeCloseTo(283.1605, 9);
+    expect(padDomain([0, 1e-13])).toEqual([-5e-15, 1e-13 + 5e-15]);
+  });
+});
+
+describe('wheelZoom', () => {
+  const xs = makeScale([0, 10], [50, 450]);
+  const ys = makeScale([0, 1], [210, 10]);
+  const area = { left: 50, top: 10, width: 400, height: 200 };
+  it('zooms both domains around the cursor, keeping the value under the pointer in place', () => {
+    const z = wheelZoom(xs, ys, area, 250, 110, -60);
+    expect(z).toBeDefined();
+    expect(z!.x[1] - z!.x[0]).toBeLessThan(10);
+    expect(z!.y[1] - z!.y[0]).toBeLessThan(1);
+    expect((5 - z!.x[0]) / (z!.x[1] - z!.x[0])).toBeCloseTo(0.5);
+    expect((0.5 - z!.y[0]) / (z!.y[1] - z!.y[0])).toBeCloseTo(0.5);
+    const edge = wheelZoom(xs, ys, area, 130, 110, -60)!;
+    expect((2 - edge.x[0]) / (edge.x[1] - edge.x[0])).toBeCloseTo(0.2);
+    const out = wheelZoom(xs, ys, area, 250, 110, 60)!;
+    expect(out.x[1] - out.x[0]).toBeGreaterThan(10);
+  });
+  it('ignores wheel events outside the plotting area (tick labels, axis title, margins)', () => {
+    expect(wheelZoom(xs, ys, area, 20, 100, -60)).toBeUndefined();
+    expect(wheelZoom(xs, ys, area, 250, 230, -60)).toBeUndefined();
+    expect(wheelZoom(xs, ys, area, 460, 100, -60)).toBeUndefined();
+    expect(wheelZoom(xs, ys, area, 250, 5, -60)).toBeUndefined();
+  });
+  it('clamps very large deltas to a single notch', () => {
+    expect(wheelZoom(xs, ys, area, 250, 110, -6000)!.x).toEqual(wheelZoom(xs, ys, area, 250, 110, -60)!.x);
   });
 });
