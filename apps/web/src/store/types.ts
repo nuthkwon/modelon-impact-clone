@@ -293,7 +293,7 @@ export interface Sticky {
   /** Component the sticky is attached to ('' for top-level). */
   component: string;
   variable: string;
-  /** Offset from the component origin in diagram units. */
+  /** Offset from the component's visual centre (placement bounds centre) in diagram units. */
   dx: number;
   dy: number;
   pinned: boolean;
