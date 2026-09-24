@@ -7,7 +7,8 @@
  *   banner "Line N: message".
  * - Switching class auto-saves asynchronously after `openClass()` has already cleared `codeDraft`,
  *   so the text is stashed per class first (`drafts.ts`); a failed save keeps the stash, warns with
- *   a banner and the draft (with its diagnostic) is restored when the class is reopened.
+ *   a banner here (the canvas banners are not shown while the Code view is) and in the store, and
+ *   the draft (with its diagnostic) is restored when the class is reopened.
  * - Keystrokes typed while a save is in flight are kept: the editor only snaps to the registry
  *   text when its document still equals the text that was saved.
  * - Read-only library classes are shown with `EditorState.readOnly` and a banner.
@@ -25,10 +26,10 @@ import { closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
 import type { Diagnostic } from '@impact/core';
 import { useStore } from '../../store';
 import { useShellStore } from '../shell/shellActions';
-import { CloseIcon, ErrorIcon, InfoIcon, SaveIcon } from '../icons';
+import { CloseIcon, ErrorIcon, InfoIcon, SaveIcon, WarningIcon } from '../icons';
 import { Tooltip } from '../common/Tooltip';
 import { modelica } from './modelica';
-import { clearDraft, draftKey, followRegistryAction, markDraftFailed, stashDraft, takeDraft } from './drafts';
+import { clearDraft, draftKey, failedDrafts, followRegistryAction, markDraftFailed, stashDraft, takeDraft } from './drafts';
 import './code.css';
 
 // ---- error line marker ----------------------------------------------------------------------
@@ -77,6 +78,7 @@ type Status = 'saved' | 'dirty' | 'error' | 'readonly' | 'saving';
 
 export function CodeView() {
   const activeClass = useStore((s) => s.activeClass);
+  const workspaceId = useStore((s) => s.workspaceId);
   const registryVersion = useStore((s) => s.registryVersion);
   const dirty = useStore((s) => s.codeDraft !== undefined);
   const codeTarget = useShellStore((s) => s.codeTarget);
@@ -88,6 +90,15 @@ export function CodeView() {
   const sentRef = useRef<{ className: string; text: string } | undefined>(undefined);
   const [diagnostic, setDiagnostic] = useState<Diagnostic | undefined>(undefined);
   const [saving, setSaving] = useState(false);
+  /** Bumped whenever the draft stash changes, so the warning banners below re-read it. */
+  const [draftsSeq, setDraftsSeq] = useState(0);
+  const [dismissedNotices, setDismissedNotices] = useState<string[]>([]);
+  // Classes left with edits their auto-save rejected (drafts stashed). Derived from the stash so the
+  // banners survive Diagram ↔ Code view switches, which remount this component.
+  const notices = useMemo(() => {
+    void draftsSeq;
+    return failedDrafts(workspaceId).filter((d) => d.className !== activeClass && !dismissedNotices.includes(d.className));
+  }, [draftsSeq, workspaceId, activeClass, dismissedNotices]);
 
   const fileInfo = useMemo(() => {
     void registryVersion;
@@ -126,6 +137,7 @@ export function CodeView() {
         // diagnostic), and the user is told, since the Code view of that class is no longer shown.
         markDraftFailed(stashKey, text, diag);
         const where = diag?.loc ? `line ${diag.loc.line}: ` : '';
+        setDraftsSeq((n) => n + 1);
         st.pushBanner({ severity: 'warning', message: `${className} has unsaved changes that could not be saved (${where}${diag?.message ?? 'unknown error'}). Reopen the class in the Code view to fix them.`, className });
         return false;
       }
@@ -149,6 +161,7 @@ export function CodeView() {
     const doc = s.codeDraft ?? restored?.text ?? classText ?? '';
     if (restored) s.setCodeDraft(restored.text);
     setDiagnostic(restored?.diagnostic);
+    if (stashed) setDraftsSeq((n) => n + 1);
 
     const extensions: Extension[] = [
       lineNumbers(),
@@ -309,6 +322,21 @@ export function CodeView() {
           <span className="banner-text">Read-only library class</span>
         </div>
       )}
+      {notices.map((n) => (
+        <div key={n.className} className="code-banner warning" role="alert">
+          <WarningIcon size={16} />
+          <span className="banner-text">
+            {n.className} has unsaved changes that could not be saved ({n.diagnostic.loc ? `line ${n.diagnostic.loc.line}: ` : ''}
+            {n.diagnostic.message}).
+          </span>
+          <button type="button" className="link" onClick={() => useStore.getState().openClass(n.className)}>
+            Open {n.className.split('.').pop()}
+          </button>
+          <button type="button" className="icon-button" aria-label="Dismiss" onClick={() => setDismissedNotices((d) => [...d, n.className])}>
+            <CloseIcon />
+          </button>
+        </div>
+      ))}
       {diagnostic && (
         <div className="code-banner error" role="alert">
           <ErrorIcon size={16} />

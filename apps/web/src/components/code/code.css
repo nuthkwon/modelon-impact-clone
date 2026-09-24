@@ -53,6 +53,8 @@ html[data-theme="dark"] {
 .code-banner { display: flex; align-items: center; gap: 8px; padding: 6px 12px; font-size: 12px; flex: 0 0 auto; }
 .code-banner.readonly { background: var(--warning-bg); color: var(--text-primary); border-bottom: 1px solid var(--border); }
 .code-banner.error { background: var(--error-bg); color: var(--error); border-bottom: 1px solid var(--border); }
+.code-banner.warning { background: var(--warning-bg); color: var(--text-primary); border-bottom: 1px solid var(--border); }
+.code-banner.warning svg { color: var(--warning); }
 .code-banner .banner-text { flex: 1 1 auto; }
 .code-banner button.link { color: inherit; text-decoration: underline; font-weight: 600; }
 .code-banner .icon-button { width: 24px; height: 24px; color: inherit; }

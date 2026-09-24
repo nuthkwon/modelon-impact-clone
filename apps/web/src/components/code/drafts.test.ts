@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { clearAllDrafts, clearDraft, draftKey, followRegistryAction, markDraftFailed, peekDraft, stashDraft, takeDraft } from './drafts';
+import { clearAllDrafts, clearDraft, draftKey, failedDrafts, followRegistryAction, markDraftFailed, peekDraft, stashDraft, takeDraft } from './drafts';
 
 describe('code drafts stash', () => {
   beforeEach(() => clearAllDrafts());
@@ -28,6 +28,17 @@ describe('code drafts stash', () => {
     stashDraft(key, { text: 'newer' });
     markDraftFailed(key, 'bad', { severity: 'error', message: 'stale' });
     expect(peekDraft(key)).toEqual({ text: 'newer' });
+  });
+
+  it('lists the drafts of a workspace whose save failed, not in-flight ones or other workspaces', () => {
+    const diagnostic = { severity: 'error' as const, message: 'Unexpected token', loc: { line: 4, column: 12, offset: 60, length: 1 } };
+    stashDraft(draftKey('ws', 'Examples.A'), { text: 'bad', diagnostic });
+    stashDraft(draftKey('ws', 'Examples.B'), { text: 'saving…' });
+    stashDraft(draftKey('other', 'Examples.C'), { text: 'bad', diagnostic });
+    expect(failedDrafts('ws')).toEqual([{ className: 'Examples.A', diagnostic }]);
+    expect(failedDrafts('other').map((d) => d.className)).toEqual(['Examples.C']);
+    takeDraft(draftKey('ws', 'Examples.A'));
+    expect(failedDrafts('ws')).toEqual([]);
   });
 
   it('drops the stash only when the saved text is the stashed one', () => {

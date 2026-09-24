@@ -101,6 +101,15 @@ export function markDraftFailed(key: string, text: string, diagnostic: Diagnosti
   persist();
 }
 
+/** Stashed drafts of `workspaceId` whose save failed (the diagnostic is known), for the Code view's warning banners. */
+export function failedDrafts(workspaceId: string | undefined): { className: string; diagnostic: Diagnostic }[] {
+  load();
+  const prefix = draftKey(workspaceId, '');
+  const out: { className: string; diagnostic: Diagnostic }[] = [];
+  for (const [k, d] of drafts) if (k.startsWith(prefix) && d.diagnostic) out.push({ className: k.slice(prefix.length), diagnostic: d.diagnostic });
+  return out;
+}
+
 /** Test hook: forgets every stash (memory and storage). */
 export function clearAllDrafts(): void {
   loaded = true;
