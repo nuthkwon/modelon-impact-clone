@@ -5,6 +5,8 @@
  */
 import type { DragEvent, JSX, ReactNode } from 'react';
 import { formatNumber, unitLabel } from '@impact/core';
+import { displayInfo } from './resultMeta';
+import { useStore } from '../../store';
 import { Tooltip } from '../common/Tooltip';
 import { Icon } from '../icons';
 import { setVariableDrag } from '../plots/dragTypes';
@@ -19,6 +21,8 @@ export interface VariableRowProps {
   label?: string;
   depth?: number;
   unit?: string;
+  /** `displayUnit` attribute; values are converted when display units are enabled in the settings. */
+  displayUnit?: string;
   description?: string;
   resultId?: string;
   caseId?: string;
@@ -43,10 +47,12 @@ function Highlight({ text, needle }: { text: string; needle?: string }): JSX.Ele
   );
 }
 
-export function VariableRow({ variable, label, depth = 0, unit, description, resultId, caseId, favorite = false, actions, leading, highlight }: VariableRowProps): JSX.Element {
+export function VariableRow({ variable, label, depth = 0, unit, displayUnit, description, resultId, caseId, favorite = false, actions, leading, highlight }: VariableRowProps): JSX.Element {
   const { value, loaded } = useVariableValue(variable, resultId, caseId);
+  const showDisplayUnits = useStore((s) => s.settings.showDisplayUnits);
+  const disp = displayInfo(unit, displayUnit, showDisplayUnits);
   const hasResult = Boolean(resultId && caseId);
-  const text = !hasResult ? '–' : loaded ? (value !== undefined && Number.isFinite(value) ? formatNumber(value, 6) : '–') : '…';
+  const text = !hasResult ? '–' : loaded ? (value !== undefined && Number.isFinite(value) ? formatNumber(disp.convert(value), 6) : '–') : '…';
 
   const onDragStart = (e: DragEvent<HTMLDivElement>) => {
     setVariableDrag(e.dataTransfer, { resultId, variable });
@@ -66,7 +72,7 @@ export function VariableRow({ variable, label, depth = 0, unit, description, res
         <Highlight text={label ?? variable} needle={highlight} />
       </span>
       <span className={`var-value${loaded ? '' : ' pending'}`}>{text}</span>
-      <span className="var-unit">{unit ? unitLabel(unit) : ''}</span>
+      <span className="var-unit">{disp.unit ? unitLabel(disp.unit) : ''}</span>
       <span className="var-actions">
         <Tooltip text="Add Variable to Plot">
           <button type="button" className="var-action" onClick={() => actions.addToPlot(variable)} aria-label={`Add ${variable} to plot`}>

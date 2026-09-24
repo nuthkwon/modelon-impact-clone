@@ -6,7 +6,7 @@
  */
 import { memo, useMemo } from 'react';
 import type { ComponentView } from '@impact/core';
-import { matrixToSvg, normalizeExtent, placementMatrix } from '@impact/core';
+import { matrixToSvg, multiply, normalizeExtent, placementMatrix } from '@impact/core';
 import { GraphicsItems } from '../graphics/GraphicsLayerSvg';
 import { classifyPort, domainOf, portRefOf, type ConnectorInfo, type PortAnchor, type PortCompatibility } from './geometry';
 import { PortMarker } from './PortMarker';
@@ -24,6 +24,8 @@ export interface ComponentNodeProps {
 
 export const ComponentNode = memo(function ComponentNode({ component, selected, liveTransform, connectFrom, connectorInfo }: ComponentNodeProps) {
   const m = useMemo(() => placementMatrix(component.placement, component.icon.coordinateSystem), [component]);
+  // Screen orientation of the icon (root y-flip ∘ placement); zoom is uniform and irrelevant for text orientation.
+  const world = useMemo(() => multiply({ a: 1, b: 0, c: 0, d: -1, e: 0, f: 0 }, m), [m]);
   const subs = useMemo(
     () => ({
       name: component.name,
@@ -55,7 +57,7 @@ export const ComponentNode = memo(function ComponentNode({ component, selected, 
     <g className={cls} data-component={component.name} data-port={component.isConnector ? component.name : undefined} transform={liveTransform} opacity={component.disabled ? 0.4 : undefined}>
       <g transform={matrixToSvg(m)}>
         {ownCompatibility && <rect className="port-halo" x={x1 - pad} y={y1 - pad} width={w + 2 * pad} height={h + 2 * pad} rx={pad} ry={pad} vectorEffect="non-scaling-stroke" />}
-        <GraphicsItems items={component.icon.graphics} subs={subs} />
+        <GraphicsItems items={component.icon.graphics} subs={subs} world={world} />
         <rect className="component-hit" x={x1} y={y1} width={w} height={h} fill="transparent" stroke="none" />
         {component.ports.map((p) => (
           <PortMarker key={p.name} port={p} componentName={component.name} compatibility={connectFrom ? classifyPort(connectFrom, portRefOf(p, component.name)) : undefined} />

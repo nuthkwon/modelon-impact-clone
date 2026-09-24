@@ -9,7 +9,7 @@
  */
 import { memo, useId } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
-import type { Color, CoordinateSystem, EllipseItem, Extent, GraphicItem, GraphicsLayer, LineItem, LinePattern, Point, PolygonItem, RectangleItem, TextItem } from '@impact/core';
+import type { AffineMatrix, Color, CoordinateSystem, EllipseItem, Extent, GraphicItem, GraphicsLayer, LineItem, LinePattern, Point, PolygonItem, RectangleItem, TextItem } from '@impact/core';
 import { colorToCss, DEFAULT_COORDINATE_SYSTEM } from '@impact/core';
 
 export interface TextSubstitutions {
@@ -273,7 +273,33 @@ function estimateTextWidth(text: string, fontSize: number): number {
   return w * fontSize;
 }
 
-const Txt = ({ item, subs }: { item: TextItem; subs?: TextSubstitutions }) => {
+/**
+ * Local 2×2 correction applied to text so it is never mirrored or upside-down, whatever the
+ * enclosing component's flip/rotation. `world` maps the item's coordinates to the screen
+ * (y down). Returns the SVG matrix string for the text group (about the text anchor).
+ */
+export function uprightTextTransform(world?: AffineMatrix): string {
+  if (!world) return 'scale(1,-1)';
+  const { a, b, c, d } = world;
+  const det = a * d - b * c;
+  if (Math.abs(det) < 1e-12) return 'scale(1,-1)';
+  const s = Math.sqrt(Math.abs(det));
+  // Direction of the local x axis on screen; keep text reading left→right (or vertical).
+  let theta = Math.atan2(b, a);
+  if (Math.abs(theta) > Math.PI / 2 + 1e-6) theta += Math.PI;
+  const cos = Math.cos(theta) * s;
+  const sin = Math.sin(theta) * s;
+  // L = W⁻¹ · R(theta)·s
+  const inv = { a: d / det, b: -b / det, c: -c / det, d: a / det };
+  const la = inv.a * cos + inv.c * sin;
+  const lb = inv.b * cos + inv.d * sin;
+  const lc = inv.a * -sin + inv.c * cos;
+  const ld = inv.b * -sin + inv.d * cos;
+  const f = (v: number) => (Math.abs(v) < 1e-12 ? 0 : Number(v.toFixed(6)));
+  return `matrix(${f(la)} ${f(lb)} ${f(lc)} ${f(ld)} 0 0)`;
+}
+
+const Txt = ({ item, subs, world }: { item: TextItem; subs?: TextSubstitutions; world?: AffineMatrix }) => {
   const text = substituteText(item.textString, subs);
   if (!text) return null;
   const { x, y, w, h, cx, cy } = extentBox(item.extent);
@@ -293,7 +319,7 @@ const Txt = ({ item, subs }: { item: TextItem; subs?: TextSubstitutions }) => {
   const totalH = lineHeight * lines.length;
   return (
     <g transform={itemTransform(item)}>
-      <g transform={`translate(${tx} ${cy}) scale(1,-1)`}>
+      <g transform={`translate(${tx} ${cy}) ${uprightTextTransform(world)}`}>
         <text
           x={0}
           y={-totalH / 2 + fontSize * 0.8}
@@ -324,10 +350,15 @@ export interface GraphicsItemsProps {
   subs?: TextSubstitutions;
   /** Skip text items (used for tiny thumbnails where text becomes noise). */
   hideText?: boolean;
+  /**
+   * Matrix mapping these items' coordinates to the screen (y down), used to keep texts upright
+   * when the enclosing component is flipped or rotated by 180°. Defaults to the plain y-flip.
+   */
+  world?: AffineMatrix;
 }
 
 /** Renders graphic items in Modelica coordinates (y up). Place inside a y-flipped parent. */
-export const GraphicsItems = memo(function GraphicsItems({ items, subs, hideText }: GraphicsItemsProps) {
+export const GraphicsItems = memo(function GraphicsItems({ items, subs, hideText, world }: GraphicsItemsProps) {
   const uid = useId().replace(/[^a-zA-Z0-9_-]/g, '');
   return (
     <g>
@@ -338,7 +369,7 @@ export const GraphicsItems = memo(function GraphicsItems({ items, subs, hideText
           case 'Ellipse': return <Ell key={i} item={item} uid={uid} index={i} />;
           case 'Polygon': return <Poly key={i} item={item} uid={uid} index={i} />;
           case 'Line': return <Ln key={i} item={item} uid={uid} index={i} />;
-          case 'Text': return hideText ? null : <Txt key={i} item={item} subs={subs} />;
+          case 'Text': return hideText ? null : <Txt key={i} item={item} subs={subs} world={world} />;
           case 'Bitmap': {
             const { x, y, w, h } = extentBox(item.extent);
             return item.imageSource || item.fileName ? (

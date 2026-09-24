@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { JSX } from 'react';
 import { useStore } from '../../store';
 import { Icon } from '../icons';
-import { unitOf, useCaseMeta } from './resultMeta';
+import { displayUnitOf, unitOf, useCaseMeta } from './resultMeta';
 import { useActiveResultCase, useBatchTrajectories, useFavorites, useVariableActions } from './variableHooks';
 import { VariableRow } from './VariableRow';
 import { TYPE_FILTERS, buildVariableTree, classifyVariable, flattenTree, matchesTypeFilter, pruneTree } from './variableTree';
@@ -169,6 +169,7 @@ export function CalculatedValuesTab(): JSX.Element {
               label={r.node.name}
               depth={r.depth}
               unit={unitOf(meta, r.node.variable)}
+              displayUnit={displayUnitOf(meta, r.node.variable)}
               description={meta?.get(r.node.variable)?.description}
               resultId={result.id}
               caseId={caseId}

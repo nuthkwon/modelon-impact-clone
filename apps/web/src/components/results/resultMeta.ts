@@ -3,6 +3,7 @@
  * keyed by `${resultId}/${caseId}`. Failures resolve to undefined so callers fall back to
  * name/trajectory-based classification.
  */
+import { unitConversion } from '@impact/core';
 import { useEffect, useState } from 'react';
 import type { CaseResultMetaResponse, CaseVariableMeta } from '@impact/protocol';
 import { api } from '../../api/client';
@@ -73,8 +74,25 @@ export function useCaseMeta(resultId?: string, caseId?: string): VariableMetaMap
   return meta;
 }
 
-/** Display unit for a variable (`displayUnit` preferred), or undefined. */
+/** SI unit of a variable (the unit its values are stored in), or undefined. */
 export function unitOf(meta: VariableMetaMap | undefined, variable: string): string | undefined {
   const m = meta?.get(variable);
-  return m?.displayUnit || m?.unit || undefined;
+  return m?.unit || undefined;
+}
+
+/** `displayUnit` attribute of a variable, or undefined. */
+export function displayUnitOf(meta: VariableMetaMap | undefined, variable: string): string | undefined {
+  const m = meta?.get(variable);
+  return m?.displayUnit || undefined;
+}
+
+/**
+ * Unit shown to the user and the value conversion for it. With display units enabled (Application
+ * settings → Units) known SI→display conversions (K→°C, rad→deg, Pa→bar, …) are applied.
+ */
+export function displayInfo(unit: string | undefined, displayUnit: string | undefined, enabled: boolean): { unit?: string; convert: (v: number) => number } {
+  if (!enabled) return { unit, convert: (v) => v };
+  const c = unitConversion(unit, displayUnit);
+  if (!c) return { unit, convert: (v) => v };
+  return { unit: displayUnit, convert: (v) => v * c.factor + c.offset };
 }

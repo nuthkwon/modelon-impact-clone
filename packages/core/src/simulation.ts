@@ -55,6 +55,11 @@ export interface SimulationOptions {
   dynamicDiagnostics?: boolean;
   /** Parameter overrides: flat name -> value. */
   modifiers?: Record<string, number | boolean | string>;
+  /**
+   * Skip the structural pre-processing (alias elimination, known-variable propagation, index
+   * reduction) and simulate the flat model as-is. Intended for debugging.
+   */
+  disableStructuralSimplification?: boolean;
 }
 
 export const DEFAULT_SIMULATION_OPTIONS: SimulationOptions = {
@@ -97,6 +102,12 @@ export interface SimulationStats {
   cpuTimeMs: number;
   /** Whether the run reached finalTime. */
   completed: boolean;
+  /** Number of alias variables removed by the structural analysis (`x = ±y + c`). */
+  aliasEliminated?: number;
+  /** Number of variables that were found to be constant (parameter-only equations) and propagated. */
+  propagated?: number;
+  /** States that were turned into algebraic variables by index reduction (dummy derivatives). */
+  dummyStates?: string[];
 }
 
 export interface SimulationResult {

@@ -13,7 +13,7 @@ import { formatNumber, unitLabel } from '@impact/core';
 import { useStore } from '../../store';
 import type { Sticky, Viewport } from '../../store/types';
 import { Icon } from '../icons';
-import { unitOf, useCaseMeta, type VariableMetaMap } from '../results/resultMeta';
+import { displayInfo, displayUnitOf, type VariableMetaMap, unitOf, useCaseMeta } from '../results/resultMeta';
 import { diagramToScreen, round2, shortClassName } from './geometry';
 
 const EMPTY: Sticky[] = [];
@@ -156,8 +156,11 @@ function StickyRow({ sticky, component, meta, readOnly, onRemove }: StickyRowPro
 
   const relName = relativeName(sticky);
   const param = component?.parameters.find((p) => p.name === relName);
-  const unit = param?.displayUnit ?? param?.unit ?? unitOf(meta, sticky.variable);
-  const value = useStore.getState().valueAt(sticky.variable);
+  const showDisplayUnits = useStore((s) => s.settings.showDisplayUnits);
+  const disp = displayInfo(param?.unit ?? unitOf(meta, sticky.variable), param?.displayUnit ?? displayUnitOf(meta, sticky.variable), showDisplayUnits && !sticky.editable);
+  const unit = disp.unit;
+  const rawValue = useStore.getState().valueAt(sticky.variable);
+  const value = rawValue === undefined ? undefined : disp.convert(rawValue);
   const paramText = param?.valueText ?? param?.defaultText ?? '';
   const [editText, setEditText] = useState<string | undefined>(undefined);
   useEffect(() => setEditText(undefined), [paramText]);

@@ -67,7 +67,7 @@ try {
     errors.push('execution-fab not found');
   }
   await page.keyboard.press('1');
-  await page.locator('[data-testid="view-toggle-code"]').first().click().catch(() => errors.push('code view toggle not found'));
+  await page.locator('.view-toggle button').nth(1).click().catch(() => errors.push('code view toggle not found'));
   await page.waitForTimeout(1000);
   await page.screenshot({ path: `${shots}/05-code-view.png` });
   await browser.close();

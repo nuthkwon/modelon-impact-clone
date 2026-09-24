@@ -158,12 +158,24 @@ export function equationText(eq: FlatEquation): string {
 
 // ---------------------------------------------------------------------------
 
-export function compileModel(flat: FlatModel, options: SimulationOptions): CompiledModel {
+/** Parameter/constant values of a flat model with the simulation's modifiers applied. */
+export interface ParameterEnvironment {
+  env: EvalEnv;
+  paramValues: Map<string, ConstValue>;
+  parameters: CompiledParameter[];
+  /** Modifiers that do not name a parameter, parameters without a value, ... */
+  warnings: string[];
+}
+
+/**
+ * Builds the constant-evaluation environment of a flat model: evaluated parameters/constants
+ * (bindings are evaluated lazily when the flattener left no value), overridden by
+ * `options.modifiers`. Shared by the residual compiler and the structural pre-processing.
+ */
+export function createParameterEnvironment(flat: FlatModel, options: Pick<SimulationOptions, 'modifiers'>): ParameterEnvironment {
   const warnings: string[] = [];
   const varByName = new Map<string, FlatVariable>();
   for (const v of flat.variables) varByName.set(v.name, v);
-
-  // ---- parameters & constants -------------------------------------------------------------
   const paramValues = new Map<string, ConstValue>();
   const isParam = (v: FlatVariable) => v.variability === 'parameter' || v.variability === 'constant';
   for (const v of flat.variables) {
@@ -220,6 +232,16 @@ export function compileModel(flat: FlatModel, options: SimulationOptions): Compi
     }
     parameters.push({ variable: v, value });
   }
+  return { env, paramValues, parameters, warnings };
+}
+
+export function compileModel(flat: FlatModel, options: SimulationOptions): CompiledModel {
+  const varByName = new Map<string, FlatVariable>();
+  for (const v of flat.variables) varByName.set(v.name, v);
+  const isParam = (v: FlatVariable) => v.variability === 'parameter' || v.variability === 'constant';
+
+  // ---- parameters & constants -------------------------------------------------------------
+  const { env, paramValues, parameters, warnings } = createParameterEnvironment(flat, options);
 
   // ---- states and when-assigned variables ------------------------------------------------
   const stateNames = new Set<string>();

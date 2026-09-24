@@ -13,7 +13,7 @@ import type { PlotWindow } from '../../store/types';
 import { useContextMenu } from '../common/ContextMenu';
 import { Tooltip } from '../common/Tooltip';
 import { Icon } from '../icons';
-import { unitOf, useCaseMeta } from '../results/resultMeta';
+import { displayInfo, displayUnitOf, unitOf, useCaseMeta } from '../results/resultMeta';
 import { PlotChart } from './PlotChart';
 import type { ChartSeries } from './PlotChart';
 import { usePlotSeries } from './usePlotSeries';
@@ -311,16 +311,28 @@ export function PlotWindowView({ className, plot, canvasRef }: PlotWindowViewPro
 
   // ------------------------------------------------------------------ chart inputs
   const isTime = plot.xVariable === 'time';
-  const xUnit = isTime ? 's' : unitOf(meta, plot.xVariable);
+  const showDisplayUnits = useStore((s) => s.settings.showDisplayUnits);
+  const xDisp = displayInfo(isTime ? 's' : unitOf(meta, plot.xVariable), isTime ? undefined : displayUnitOf(meta, plot.xVariable), showDisplayUnits);
+  const xUnit = xDisp.unit;
   const xName = isTime ? 'Time' : plot.xVariable;
   const xAxisLabel = xUnit ? `${xName} [${unitLabel(xUnit)}]` : xName;
   const series = useMemo<ChartSeries[]>(
     () =>
       resolved.map((s) => {
-        const u = unitOf(meta, s.variable);
-        return { id: s.id, label: s.label, color: s.color, x: s.x, y: s.y, hidden: s.hidden, unit: u ? unitLabel(u) : undefined };
+        const disp = displayInfo(unitOf(meta, s.variable), displayUnitOf(meta, s.variable), showDisplayUnits);
+        const needsY = showDisplayUnits && disp.unit !== unitOf(meta, s.variable);
+        const needsX = showDisplayUnits && !isTime && xDisp.unit !== unitOf(meta, plot.xVariable);
+        return {
+          id: s.id,
+          label: s.label,
+          color: s.color,
+          x: needsX ? s.x.map(xDisp.convert) : s.x,
+          y: needsY ? s.y.map(disp.convert) : s.y,
+          hidden: s.hidden,
+          unit: disp.unit ? unitLabel(disp.unit) : undefined,
+        };
       }),
-    [resolved, meta],
+    [resolved, meta, showDisplayUnits, isTime, plot.xVariable, xDisp],
   );
   const emptyText = plot.traces.length === 0 ? 'Drag a variable here' : loading ? 'Loading…' : error ? 'Failed to load data' : 'No data';
   const groups = useMemo(() => legendGroups(resolved, className), [resolved, className]);

@@ -6,7 +6,7 @@
 import { useMemo } from 'react';
 import type { JSX } from 'react';
 import { useStore } from '../../store';
-import { unitOf, useCaseMeta } from './resultMeta';
+import { displayUnitOf, unitOf, useCaseMeta } from './resultMeta';
 import { useActiveResultCase, useBatchTrajectories, useFavorites, useVariableActions } from './variableHooks';
 import { VariableRow } from './VariableRow';
 import './results.css';
@@ -49,6 +49,7 @@ export function VariablesList({ variables, maxRows = 500 }: VariablesListProps):
           key={v.name}
           variable={v.name}
           unit={v.unit ?? unitOf(meta, v.name)}
+          displayUnit={displayUnitOf(meta, v.name)}
           description={v.description ?? meta?.get(v.name)?.description}
           resultId={result?.id}
           caseId={caseId}
