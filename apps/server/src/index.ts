@@ -1,7 +1,8 @@
 /**
  * Server entry point. Environment: `PORT` (default 8080), `DATA_DIR`, `LIBRARIES_DIR`,
  * `MAX_CASES` (sweep expansion cap, default 1000), `CORS_ORIGIN` (comma-separated allowed
- * origins; unset = same-origin only).
+ * origins; unset = same-origin only), `SERVER_FILE_ACCESS` (`off` disables browsing/importing
+ * libraries from the server filesystem).
  */
 import { createApp } from './app.js';
 

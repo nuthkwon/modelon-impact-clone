@@ -107,6 +107,10 @@ function resolveComponentType(ctx: Ctx, decl: ComponentDecl, declaredIn: Registe
   if (!typeCls) throw error(`Unknown type '${decl.typeName}' of component '${decl.name}' in ${declaredIn.fullName}`, opts);
   const resolved = ctx.registry.resolveType(typeCls.fullName);
   if (!resolved) throw error(`Type '${typeCls.fullName}' of component '${decl.name}' cannot be resolved (cyclic short class definition)`, opts);
+  const extendsSpecifier = resolved.chain.find((c) => c.def.classExtends);
+  if (extendsSpecifier) {
+    throw error(`'extends' class specifiers are not supported: ${declText(decl)} (${extendsSpecifier.def.restriction} extends ${extendsSpecifier.fullName})`, opts);
+  }
   if (resolved.chain.some((c) => c.def.shortClass?.arrayDims && c.def.shortClass.arrayDims.length)) {
     throw error(`Arrays are not supported: ${declText(decl)} (type ${typeCls.fullName} is an array type)`, opts);
   }

@@ -113,6 +113,8 @@ function evalNode(e: Expr, env: EvalEnv, root: Expr): ConstValue {
       return fail(root, 'array expressions are not supported');
     case 'range':
       return fail(root, 'range expressions are not supported');
+    case 'iterator':
+      return fail(root, 'iterator expressions (... for i in ...) are not supported');
     case 'end':
       return fail(root, `'end' is only allowed inside subscripts`);
   }
@@ -358,6 +360,8 @@ export function formatExpr(e: Expr, parentPrec = 0): string {
       return `{${e.elements.map((x) => formatExpr(x)).join(', ')}}`;
     case 'range':
       return e.step ? `${formatExpr(e.start)}:${formatExpr(e.step)}:${formatExpr(e.end)}` : `${formatExpr(e.start)}:${formatExpr(e.end)}`;
+    case 'iterator':
+      return `${formatExpr(e.body)} for ${e.iterators.map((it) => (it.range ? `${it.name} in ${formatExpr(it.range)}` : it.name)).join(', ')}`;
     case 'end':
       return 'end';
   }

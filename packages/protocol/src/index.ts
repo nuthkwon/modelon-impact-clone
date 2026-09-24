@@ -59,6 +59,74 @@ export interface Workspace {
   sizeInfo?: { total: number };
 }
 
+// ---------------------------------------------------------------------------
+// Installed libraries (Workspace Management → Libraries)
+// ---------------------------------------------------------------------------
+
+/**
+ * A read-only Modelica library installed on the server (`GET /api/libraries`). Imported
+ * libraries are shared by every workspace; a workspace uses one by listing it among its
+ * dependencies. The Modelica Standard Library is listed too (`projectType: 'SYSTEM'`, not
+ * removable).
+ */
+export interface InstalledLibraryDto {
+  /** Library (= dependency project) id. */
+  id: string;
+  /** Top-level class name, e.g. `ThermoPower`. */
+  name: string;
+  /** `version` annotation of the top-level package, when present. */
+  version?: string;
+  /** Description string of the top-level class. */
+  description?: string;
+  projectType: ProjectType;
+  /** Where the library was imported from (a server path, or `upload`). */
+  source?: string;
+  importedAt?: string;
+  fileCount: number;
+  /** Size of the Modelica sources in bytes. */
+  size: number;
+  /** Workspaces listing this library among their dependencies. */
+  usedIn: { id: string; name: string }[];
+}
+
+/**
+ * `POST /api/libraries`: import a library either from a path on the server (`path`: a
+ * `package.mo`, a single-file library `Name.mo`, or a directory holding `package.mo`) or from
+ * uploaded files (`files`: paths relative to the upload root, e.g. `ThermoPower/package.mo`).
+ * With `workspaceId` the library is also added to that workspace's dependencies.
+ */
+export interface ImportLibraryRequest {
+  path?: string;
+  files?: { path: string; text: string }[];
+  workspaceId?: string;
+}
+
+/** One entry of a server directory listing (`GET /api/filesystem`). */
+export interface FileSystemEntry {
+  name: string;
+  /** Absolute path on the server. */
+  path: string;
+  kind: 'directory' | 'file';
+  /** Directories: holds a `package.mo` (a Modelica package directory). */
+  modelicaPackage?: boolean;
+  size?: number;
+  modifiedAt?: string;
+}
+
+/** `GET /api/filesystem?path=...`: directories and `.mo` files of a server directory. */
+export interface FileSystemListing {
+  /** Absolute, normalised directory path. */
+  path: string;
+  /** Parent directory, absent at a root. */
+  parent?: string;
+  /** Filesystem roots (`/`, or the drive letters on Windows). */
+  roots: string[];
+  /** The server user's home directory. */
+  home: string;
+  separator: string;
+  entries: FileSystemEntry[];
+}
+
 export interface ItemsResponse<T> {
   data: { items: T[] };
 }
@@ -322,6 +390,10 @@ export const API = {
   workspace: (wid: string) => `/api/workspaces/${wid}`,
   projects: (wid: string) => `/api/workspaces/${wid}/projects`,
   dependencies: (wid: string) => `/api/workspaces/${wid}/dependencies`,
+  dependency: (wid: string, lid: string) => `/api/workspaces/${wid}/dependencies/${lid}`,
+  installedLibraries: () => `/api/libraries`,
+  installedLibrary: (lid: string) => `/api/libraries/${lid}`,
+  filesystem: (path?: string) => `/api/filesystem${path !== undefined ? `?path=${encodeURIComponent(path)}` : ''}`,
   libraries: (wid: string) => `/api/workspaces/${wid}/libraries`,
   library: (wid: string, lid: string) => `/api/workspaces/${wid}/libraries/${lid}`,
   classTree: (wid: string, parent?: string) => `/api/workspaces/${wid}/classes${parent ? `?parent=${encodeURIComponent(parent)}` : ''}`,

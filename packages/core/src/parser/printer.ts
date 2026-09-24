@@ -52,6 +52,7 @@ export function printNumber(v: number): string {
 function precedence(e: Expr): number {
   switch (e.kind) {
     case 'if':
+    case 'iterator':
       return 0;
     case 'range':
       return 1;
@@ -105,6 +106,10 @@ export function printExpr(e: Expr): string {
     case 'range': {
       const part = (x: Expr) => paren(printExpr(x), precedence(x) <= 1);
       return e.step ? `${part(e.start)}:${part(e.step)}:${part(e.end)}` : `${part(e.start)}:${part(e.end)}`;
+    }
+    case 'iterator': {
+      const its = e.iterators.map((it) => (it.range ? `${it.name} in ${printExpr(it.range)}` : it.name));
+      return `${printExpr(e.body)} for ${its.join(', ')}`;
     }
     case 'if': {
       const parts = e.branches.map((b, i) => `${i === 0 ? 'if' : 'elseif'} ${printExpr(b.cond)} then ${printExpr(b.value)}`);
@@ -272,7 +277,8 @@ function classHeader(cls: ClassDef): string {
   if (cls.encapsulated) s += 'encapsulated ';
   if (cls.partial) s += 'partial ';
   if (cls.expandable && cls.restriction === 'connector') s += 'expandable ';
-  s += `${cls.restriction} ${cls.name}`;
+  s += cls.classExtends ? `${cls.restriction} extends ${cls.name}` : `${cls.restriction} ${cls.name}`;
+  if (cls.classExtends?.modification) s += printModification(cls.classExtends.modification);
   return s;
 }
 
@@ -299,7 +305,7 @@ function printShortClass(cls: ClassDef, pad: string): string {
 }
 
 function printClassLines(cls: ClassDef, pad: string, indent: string): string[] {
-  if (cls.shortClass) return [printShortClass(cls, pad)];
+  if (cls.shortClass && !cls.classExtends) return [printShortClass(cls, pad)];
   const out: string[] = [];
   const inner = pad + indent;
   out.push(pad + classHeader(cls) + (cls.description !== undefined ? ` ${printString(cls.description)}` : ''));

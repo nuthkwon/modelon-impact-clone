@@ -65,6 +65,7 @@ clear `Diagnostic` for anything else. The **flattener/solver** support the seman
 | --- | --- | --- |
 | `within A.B;` stored definitions, several top-level classes per file | ✔ | ✔ |
 | `package`, `model`, `block`, `connector`, `record`, `type`, `class`; `partial`, `encapsulated`, `expandable` | ✔ | ✔ (record as struct of components; expandable connectors ✘) |
+| Extends class specifier `redeclare record extends State(...) … end State;` | ✔ (`ClassDef.classExtends`) | ✘ (diagnostic) |
 | `function` with `algorithm` body | ✔ (body kept as opaque text) | ✘ (calling a user function is a diagnostic) |
 | Short class: `type Voltage = Real(unit="V");` `connector RealInput = input Real;` `type StateSelect = enumeration(never, avoid, default, prefer, always);` | ✔ | ✔ (type attributes merge; enumerations as strings) |
 | `extends Base(mod=...) annotation(...);` incl. `Modelica.Icons.*` bases | ✔ | ✔ (components + equations + icons merged) |
@@ -78,6 +79,7 @@ clear `Diagnostic` for anything else. The **flattener/solver** support the seman
 | `initial equation` | ✔ | ✔ |
 | `algorithm` / `initial algorithm` sections | ✔ (kept as opaque text) | ✘ (diagnostic) |
 | Expressions: `+ - * / ^`, unary minus/plus, `.+ .* etc.` (parsed), `== <> < <= > >=`, `and or not`, `if c then a else b`, parentheses, number literals (`1`, `1.5`, `1e-3`, `.5`), strings with escapes, `true/false`, `time`, refs with subscripts, ranges `1:n`, array literals `{…}`, `end` | ✔ | ✔ (arrays/ranges only in annotations) |
+| Iterators: array constructors `{e for i in 1:n}` and reductions `sum(e for i in 1:n, j)` (expression kind `iterator`) | ✔ | ✘ (diagnostic "arrays are not supported") |
 | Built-in functions: `der pre initial terminal noEvent smooth sample edge change abs sign sqrt exp log log10 sin cos tan asin acos atan atan2 sinh cosh tanh min max mod rem div floor ceil integer Modelica.Constants.pi/e/eps/inf/small/g_n` | ✔ | ✔ (`pre/sample/edge/change` limited to when-conditions; `smooth(k, e)` = `e`; `noEvent(e)` = `e`) |
 | Annotations: `Icon(coordinateSystem(...), graphics={...})`, `Diagram(...)`, `Placement(visible, transformation(origin, extent, rotation), iconTransformation(...))`, connection `Line(points, color, pattern, thickness, smooth, arrow, arrowSize)`, `Documentation(info="…", revisions="…")`, `experiment(StartTime, StopTime, Interval, Tolerance)`, `Dialog(tab, group, enable)`, `choices(...)`, `Evaluate`, `HideResult`, `defaultComponentName`, `defaultComponentPrefixes`, `DynamicSelect(a, b)` (→ `a`), `preferredView`, `version`, `uses` | ✔ (stored as modification) | interpreted where relevant |
 | Comments `//` and `/* */` | dropped by lexer | – |
@@ -173,11 +175,27 @@ apps/server/data/
   workspaces/<wid>/projects/<pid>/<Library>.mo | <Library>/package.mo + files
   workspaces/<wid>/experiments/<eid>/experiment.json  ExperimentDto
   workspaces/<wid>/experiments/<eid>/cases/<cid>.json  CaseDto + result (time + trajectories)
+  libraries/<lid>/library.json             imported library (name, version, source, …)
+  libraries/<lid>/<Library>/… | <Library>.mo   its .mo files + package.order (read-only)
 libraries/Modelica/…   read-only dependency, mounted into every workspace
 libraries/Examples/…   editable copy is seeded into every new workspace as project "Examples"
 ```
 
 On first start the server seeds a workspace named `Default` with the `Examples` project.
+
+### Imported libraries
+
+Workspace Management → Libraries → *Import* installs an external library once under
+`data/libraries/<lid>/` (`POST /api/libraries` with a server `path` — a `package.mo`, a package
+directory or a single-file `Name.mo` — or with uploaded `files`). Only Modelica sources are
+copied: `.mo` files and `package.order` in directories that hold a `package.mo`. A workspace
+loads an installed library by listing its id in `WorkspaceDefinition.dependencies`
+(`PUT`/`DELETE /api/workspaces/:wid/dependencies/:lid`); the registry cache then loads it as a
+read-only library after `Modelica` and before the editable projects. Top-level names must be
+unique within a workspace (409 otherwise). `DELETE /api/libraries/:lid` removes the library from
+every workspace. The *Import library* explorer browses the server's filesystem through
+`GET /api/filesystem?path=` (folders and `.mo` files only); `SERVER_FILE_ACCESS=off` disables
+browsing and path imports (uploads still work).
 
 ## UI
 

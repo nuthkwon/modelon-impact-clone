@@ -28,6 +28,7 @@ Modelica 텍스트가 유일한 원본(source of truth)이고, 다이어그램 �
 | **컴파일러** | Modelica 3.x 서브셋 파서/프린터, 상속·수정자·연결 확장·파라미터 평가·균형 검사, 알리아스 제거·변수 전파·더미 미분 인덱스 축소 |
 | **솔버** | CVode(가변 스텝 BDF), Radau5ODE(음함수 사다리꼴), ExplicitEuler, 이벤트(`when`/`reinit`/`sample`) 처리 |
 | **라이브러리** | Modelica Standard Library 4.0 서브셋(Blocks, Electrical.Analog, Mechanics.Rotational/Translational, Thermal.HeatTransfer, Units, Constants, Icons — 실제 MSL 아이콘/방정식 사용, BSD-3) + 예제 10종 |
+| **외부 라이브러리 로드/언로드** | Impact와 같이 PROJECTS 옆 톱니바퀴 "Configure workspace"(또는 Apps → Workspace Management)에서 관리. **LIBRARIES** 탭의 **Import** → 파일 탐색기에서 `package.mo`(또는 단일 `.mo`)를 선택하면 라이브러리가 설치되고 워크스페이스의 LIBRARIES에 로드됨(예: [ThermoPower](https://github.com/casella/ThermoPower)). **WORKSPACE CONFIGURATION** 탭의 Edit → `×`로 언로드, `+`/드래그로 다시 로드, `⋮` → Delete로 서버에서 삭제. 로컬 폴더 업로드도 지원 |
 | **서버 / API** | Express 5, Impact 공개 REST API 형태(workspaces, projects, model-executables, experiments, cases, trajectories, custom-functions)를 그대로 미러링. 시뮬레이션은 worker thread에서 실행되어 취소 가능하고 서버가 응답성을 유지함 |
 
 ## 실행 방법
@@ -49,6 +50,9 @@ npm run dev          # 서버(8080) + 웹(5173) 동시 실행
 npm run build        # packages + apps 빌드 (웹은 apps/web/dist)
 npm start            # 서버가 apps/web/dist를 정적 서빙 (http://localhost:8080)
 ```
+
+서버 파일 탐색: *Import library* 탐색기는 **서버가 실행되는 컴퓨터**의 파일 시스템을 보여줍니다(폴더와 `.mo` 파일만).
+서버가 다른 컴퓨터에 있으면 "Upload from this computer"로 폴더를 업로드하세요. `SERVER_FILE_ACCESS=off`로 서버 파일 탐색을 끌 수 있습니다.
 
 테스트 / 타입 검사:
 
@@ -80,6 +84,7 @@ docs/               ARCHITECTURE.md, UI_SPEC.md, LIBRARY.md
 ## 제한 사항
 
 - Modelica 서브셋: 배열, 함수, algorithm 섹션, `redeclare`, `inner/outer`, `stream`은 지원하지 않습니다(명확한 진단 메시지 출력).
+- 외부 라이브러리(ThermoPower 등)는 파싱·트리 표시·아이콘·파라미터 보기까지 지원합니다. 배열·함수·Media를 쓰는 모델이 많아 대부분은 시뮬레이션되지 않습니다(진단 메시지 출력). MSL 3.x 전용 이름(`Modelica.SIunits` 등)은 포함된 MSL 4.0 서브셋에서 찾을 수 없습니다.
 - 솔버는 자체 구현입니다. `CVode`/`Radau5ODE` 라벨은 Impact UI와 맞추기 위한 것으로, 실제로는 각각 가변 스텝 BDF(1–2차)와 음함수 사다리꼴 적분기입니다.
 - 3D 애니메이션, Steady-State 전용 솔버(PbS), 커스텀 함수(Python), Git/SVN 연동, 사용자 인증은 포함하지 않습니다.
 - Modelon Impact의 로고·상표는 사용하지 않았습니다. 이 프로젝트는 Modelon과 무관합니다.

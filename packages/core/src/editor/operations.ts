@@ -716,6 +716,7 @@ function stripLoc(e: Expr): void {
     case 'if': e.branches.forEach((b) => { stripLoc(b.cond); stripLoc(b.value); }); stripLoc(e.else); return;
     case 'array': e.elements.forEach(stripLoc); return;
     case 'range': stripLoc(e.start); if (e.step) stripLoc(e.step); stripLoc(e.end); return;
+    case 'iterator': stripLoc(e.body); for (const it of e.iterators) if (it.range) stripLoc(it.range); return;
     default: return;
   }
 }

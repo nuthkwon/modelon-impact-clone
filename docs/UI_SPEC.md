@@ -58,9 +58,10 @@ strip with a "Libraries" icon.
   ("Limit libraries" – popover with checkboxes per library). Right: "Create class" `+` icon
   button (opens the *New class* dialog).
 - Section **"PROJECTS"** (11px uppercase, letter-spacing .08em, `--text-secondary`) with a
-  cogwheel "Configure workspace" icon button (opens a dialog listing projects and dependencies;
-  read-only in this clone). Below: tree of the workspace's editable projects (`Examples`, …).
-- Section **"LIBRARIES"**: read-only dependency libraries (`Modelica`).
+  cogwheel "Configure workspace" icon button (opens *Workspace Management*, §4.1). Below: tree
+  of the workspace's editable projects (`Examples`, …).
+- Section **"LIBRARIES"**: read-only dependency libraries (`Modelica` and the imported libraries
+  the workspace loads, e.g. `ThermoPower`).
 - Tree rows: 26px high, indent 16px per level, chevron (▸/▾, 16px) for packages, class icon
   rendered from its Modelica `Icon` annotation at 18×18 (fallback glyphs: package = folder-like
   MSL package icon, model = rounded square, connector = small filled square, function = "f",
@@ -78,6 +79,31 @@ strip with a "Libraries" icon.
   "Extend…", "Delete permanently" (editable projects only). On a class: "Open", "Show
   Documentation", "Extend…", "Duplicate to…", "Rename…", "Delete permanently", "Copy class path".
   On a project: "New class…", "Configure workspace".
+
+### 4.1 Workspace Management (loading and unloading libraries)
+
+As in Impact, libraries are managed in *Workspace Management*, opened by the "Configure
+workspace" cogwheel next to PROJECTS, the project context menu "Configure workspace", or
+Apps → "Workspace Management". Two tabs:
+
+- **WORKSPACE CONFIGURATION** — workspace name, **Projects** and **Dependencies**. "Edit" (→
+  "Done") shows the **Available libraries** panel (installed libraries not in the workspace,
+  with a Filter): drag one onto the dependencies (dashed "Drop libraries here…" zone) or press
+  `+` to load it; `×` on a dependency ("Remove from workspace") unloads it. `Modelica` shows a
+  lock ("always loaded"). The Workspace panel reloads immediately (Impact asks for a page
+  reload instead).
+- **LIBRARIES** — every installed library (name, version, SYSTEM/RELEASED badge, description,
+  files/size/source, "Used in: …", "In this workspace" chip). **"Import"** opens the *Import
+  library* explorer; the `⋮` menu has "Add to workspace" / "Remove from workspace" and
+  "Delete" (confirmation names the workspaces that use it).
+
+*Import library* explorer: Up / Home buttons, drive selector (Windows), editable path field
+(Enter navigates), list of folders and `.mo` files (Name / Modified / Size; package folders get
+a package icon and "Modelica package" chip, `package.mo` a "Library root" chip). Double-click
+opens a folder; selecting `package.mo` (or a single-file `Name.mo`, or a package folder) and
+pressing "Import" (or double-clicking the file) imports the library; "Add to workspace
+**Name**" (checked by default) also loads it. "Upload from this computer" uploads a local
+library folder or `.mo` file instead.
 
 ## 5. Model canvas (center)
 

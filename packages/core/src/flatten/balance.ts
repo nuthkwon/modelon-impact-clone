@@ -46,6 +46,10 @@ export function collectStates(model: FlatModel): Set<string> {
         visit(e.step);
         visit(e.end);
         break;
+      case 'iterator':
+        visit(e.body);
+        e.iterators.forEach((it) => visit(it.range));
+        break;
       default:
         break;
     }

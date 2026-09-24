@@ -1,6 +1,7 @@
 /**
- * One `ClassRegistry` per workspace, built lazily from the read-only `Modelica` dependency
- * plus every MODELICA content of the workspace's editable projects.
+ * One `ClassRegistry` per workspace, built lazily from the read-only `Modelica` dependency,
+ * the workspace's imported library dependencies (read-only) and every MODELICA content of its
+ * editable projects.
  *
  * Load order inside a library is deterministic: `package.mo` first, then the remaining
  * entries alphabetically (directories are packages and recurse the same way), and finally
@@ -98,6 +99,25 @@ export class RegistryCache {
     registry.addLibrary({ id: modelica.id, name: modelica.name, readOnly: true });
     wr.libraries.set(modelica.id, modelica);
     this.loadLibrary(wr, modelica);
+
+    for (const dep of this.storage.dependencyProjects(wid)) {
+      if (dep.id === MODELICA_LIBRARY_ID) continue;
+      for (const content of dep.definition.content) {
+        if (content.contentType !== 'MODELICA') continue;
+        const lib: LibraryEntry = {
+          id: content.id,
+          name: content.name,
+          readOnly: true,
+          containerDir: this.storage.installedLibraryDir(dep.id),
+          roots: [{ relpath: content.relpath, name: content.name }],
+          version: 1,
+          files: new Map(),
+        };
+        registry.addLibrary({ id: lib.id, name: lib.name, readOnly: true });
+        wr.libraries.set(lib.id, lib);
+        this.loadLibrary(wr, lib);
+      }
+    }
 
     for (const project of this.storage.editableProjects(wid)) {
       for (const content of project.definition.content) {

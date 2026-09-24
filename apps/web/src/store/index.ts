@@ -10,7 +10,7 @@ import {
   flatRef,
 } from '@impact/core';
 import type { Diagnostic, DiagramView, EditOperation, EditResult, Point } from '@impact/core';
-import type { CaseDto, ClassSourceDto, CreateExperimentRequest, ExperimentDto } from '@impact/protocol';
+import type { CaseDto, ClassSourceDto, CreateExperimentRequest, ExperimentDto, LibraryBundleDto } from '@impact/protocol';
 import { api, ApiClientError } from '../api/client';
 import type {
   AnalysisSettings,
@@ -249,6 +249,20 @@ const failedTrajectories = new Map<string, number>();
 const trajectoryKey = (resultId: string, caseId: string, variable: string): string => `${resultId}/${caseId}/${variable}`;
 
 /** Slices that belong to one workspace and must not leak into the next (editor, history, run, results, logs, banners). */
+/** Registers a library bundle, loading `package.mo` files first so nested files find their parents. */
+function addBundle(registry: ClassRegistry, lib: LibraryBundleDto, fileDiagnostics: Record<string, Diagnostic[]>): void {
+  registry.addLibrary({ id: lib.libraryId, name: lib.name, readOnly: lib.readOnly });
+  const files = [...lib.files].sort((a, b) => {
+    const ap = a.path.endsWith('package.mo') ? 0 : 1;
+    const bp = b.path.endsWith('package.mo') ? 0 : 1;
+    return ap - bp || a.path.localeCompare(b.path);
+  });
+  for (const f of files) {
+    const diags = registry.addFile(lib.libraryId, f.path, f.text);
+    if (diags.length) fileDiagnostics[ClassRegistry.fileKey(lib.libraryId, f.path)] = diags;
+  }
+}
+
 function workspaceScopedReset(detailsTab: string): Partial<AppState> {
   return {
     activeClass: undefined,
@@ -538,18 +552,7 @@ export const useStore = create<AppState>()((set, get) => {
         const [ws, projects, deps, libs] = await Promise.all([api.getWorkspace(wid), api.listProjects(wid), api.listDependencies(wid), api.listLibraries(wid)]);
         const registry = new ClassRegistry();
         const fileDiagnostics: Record<string, Diagnostic[]> = {};
-        for (const lib of libs.data.items) {
-          registry.addLibrary({ id: lib.libraryId, name: lib.name, readOnly: lib.readOnly });
-          const files = [...lib.files].sort((a, b) => {
-            const ap = a.path.endsWith('package.mo') ? 0 : 1;
-            const bp = b.path.endsWith('package.mo') ? 0 : 1;
-            return ap - bp || a.path.localeCompare(b.path);
-          });
-          for (const f of files) {
-            const diags = registry.addFile(lib.libraryId, f.path, f.text);
-            if (diags.length) fileDiagnostics[ClassRegistry.fileKey(lib.libraryId, f.path)] = diags;
-          }
-        }
+        for (const lib of libs.data.items) addBundle(registry, lib, fileDiagnostics);
         const persisted = loadPersisted(wid);
         if (get().workspaceId !== wid) return; // another workspace was opened meanwhile
         set({
@@ -581,6 +584,32 @@ export const useStore = create<AppState>()((set, get) => {
         if (get().workspaceId !== wid) return;
         set({ loading: false, loadError: e instanceof Error ? e.message : String(e) });
       }
+    },
+
+    async reloadLibraries() {
+      const wid = get().workspaceId;
+      if (!wid) return;
+      const [ws, deps, libs] = await Promise.all([api.getWorkspace(wid), api.listDependencies(wid), api.listLibraries(wid)]);
+      if (get().workspaceId !== wid) return;
+      const registry = get().registry;
+      const fileDiagnostics = { ...get().fileDiagnostics };
+      const wanted = new Map(libs.data.items.filter((l) => l.readOnly).map((l) => [l.libraryId, l]));
+      for (const info of registry.listLibraries()) {
+        if (!info.readOnly || wanted.has(info.id)) continue;
+        registry.removeLibrary(info.id);
+        for (const key of Object.keys(fileDiagnostics)) if (key.startsWith(`${info.id}::`)) delete fileDiagnostics[key];
+      }
+      for (const lib of wanted.values()) if (!registry.getLibrary(lib.libraryId)) addBundle(registry, lib, fileDiagnostics);
+      const active = get().activeClass;
+      set({
+        workspace: ws,
+        dependencies: deps.data.items,
+        libraries: libs.data.items,
+        fileDiagnostics,
+        registryVersion: get().registryVersion + 1,
+        activeClass: active && !registry.has(active) ? undefined : active,
+      });
+      set(computeDiagram(get().activeClass));
     },
 
     async saveClassSource(className, text) {

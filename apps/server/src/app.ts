@@ -17,6 +17,7 @@ import { Storage } from './storage.js';
 import { classRoutes } from './routes/classes.js';
 import { customFunctionRoutes } from './routes/custom-functions.js';
 import { experimentRoutes } from './routes/experiments.js';
+import { libraryRoutes } from './routes/libraries.js';
 import { modelExecutableRoutes } from './routes/model-executables.js';
 import { systemRoutes } from './routes/system.js';
 import { workspaceRoutes } from './routes/workspaces.js';
@@ -46,6 +47,12 @@ export interface AppOptions {
   seed?: boolean;
   /** Serve this directory as the web app with SPA fallback; `false` disables. Defaults to `apps/web/dist` when it exists. */
   webDist?: string | false;
+  /**
+   * Let the *Import library* explorer browse and import from the server's filesystem
+   * (directories and `.mo` files only). Defaults to the `SERVER_FILE_ACCESS` env variable;
+   * anything but `off`/`false`/`0` enables it. Uploading libraries works either way.
+   */
+  serverFileAccess?: boolean;
   /** Suppress request logging. */
   quiet?: boolean;
   /** Log sink (default stdout). */
@@ -92,6 +99,8 @@ export function createApp(options: AppOptions = {}): ImpactApp {
   const corsOrigin = options.corsOrigin === undefined ? process.env.CORS_ORIGIN : options.corsOrigin;
   const corsOrigins = corsOrigin ? corsOrigin.split(',').map((o) => o.trim()).filter(Boolean) : [];
   if (corsOrigins.length) app.use(cors({ origin: corsOrigins }));
+  // Library uploads carry whole libraries' sources; everything else stays at 20 MB.
+  app.use('/api/libraries', express.json({ limit: '300mb' }));
   app.use(express.json({ limit: '20mb' }));
 
   app.use((req, res, next) => {
@@ -101,6 +110,8 @@ export function createApp(options: AppOptions = {}): ImpactApp {
   });
 
   app.use('/api', systemRoutes(context));
+  const serverFileAccess = options.serverFileAccess ?? !/^(off|false|0|no)$/i.test(process.env.SERVER_FILE_ACCESS ?? '');
+  app.use('/api', libraryRoutes(context, { serverFileAccess }));
   app.use('/api/workspaces', workspaceRoutes(context));
   app.use('/api/workspaces', classRoutes(context));
   app.use('/api/workspaces', customFunctionRoutes(context));

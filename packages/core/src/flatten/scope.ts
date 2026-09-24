@@ -334,6 +334,7 @@ export function flattenExpr(ctx: Ctx, e: Expr, scope: Scope): Expr {
       return flattenCall(ctx, e, scope);
     case 'array':
     case 'range':
+    case 'iterator':
       throw error(`Arrays are not supported: ${printExpr(e)}`, { path: pathOf(scope), loc: e.loc, file: fileOf(ctx, scope.cls) });
     case 'end':
       throw error(`'end' is only allowed inside array subscripts`, { path: pathOf(scope), loc: e.loc, file: fileOf(ctx, scope.cls) });

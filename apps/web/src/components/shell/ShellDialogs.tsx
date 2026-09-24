@@ -3,7 +3,8 @@ import type { JSX } from 'react';
 import { useShellStore } from './shellActions';
 import { AboutDialog } from './dialogs/AboutDialog';
 import { ConfirmDialog } from './dialogs/ConfirmDialog';
-import { DocsDialog, SupportDialog, TextDialog, WorkspaceManagementDialog } from './dialogs/InfoDialogs';
+import { DocsDialog, SupportDialog, TextDialog } from './dialogs/InfoDialogs';
+import { WorkspaceManagementDialog } from '../workspace-management/WorkspaceManagementDialog';
 import { NewClassDialog } from './dialogs/NewClassDialog';
 import { RenameDialog } from './dialogs/RenameDialog';
 import { SettingsDialog } from './dialogs/SettingsDialog';
@@ -36,7 +37,7 @@ export function ShellDialogs() {
       content = <SupportDialog onClose={close} />;
       break;
     case 'workspaceManagement':
-      content = <WorkspaceManagementDialog onClose={close} />;
+      content = <WorkspaceManagementDialog initialTab={dialog.tab} onClose={close} />;
       break;
     case 'text':
       content = <TextDialog title={dialog.title} text={dialog.text} onClose={close} />;

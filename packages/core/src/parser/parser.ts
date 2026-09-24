@@ -23,6 +23,7 @@ import {
   type Equation,
   type Expr,
   type ExtendsClause,
+  type ForIterator,
   type ImportClause,
   type Modification,
   type Modifier,
@@ -235,9 +236,7 @@ class Parser {
       default:
         this.expected('class restriction (model, package, ...)');
     }
-    if (this.isKw('extends')) {
-      this.fail(`'extends' class specifiers ('${restriction} extends ${this.peek(1).value} ... end ${this.peek(1).value};') are not supported`);
-    }
+    const classExtends = this.acceptKw('extends');
     const nameTok = this.expectIdent('as class name');
     const cls: ClassDef = {
       kind: 'class',
@@ -253,7 +252,11 @@ class Parser {
       equations: [],
       initialEquations: [],
     };
-    if (this.acceptOp('=')) {
+    if (classExtends) {
+      cls.classExtends = {};
+      if (this.isOp('(')) cls.classExtends.modification = this.parseClassModification();
+    }
+    if (!classExtends && this.acceptOp('=')) {
       this.parseShortClassSpecifier(cls);
     } else {
       const description = this.parseStringComment();
@@ -942,10 +945,12 @@ class Parser {
             this.next();
             const elements: Expr[] = [];
             if (!this.isOp('}')) {
-              for (;;) {
-                elements.push(this.parseExpression());
-                if (this.isKw('for')) this.fail('Array comprehensions ({... for i in ...}) are not supported');
-                if (!this.acceptOp(',')) break;
+              const first = this.parseExpression();
+              if (this.isKw('for')) {
+                elements.push(this.parseIteratorTail(first));
+              } else {
+                elements.push(first);
+                while (this.acceptOp(',')) elements.push(this.parseExpression());
               }
             }
             this.expectOp('}', 'to close array literal');
@@ -1016,7 +1021,12 @@ class Parser {
         namedArgs.push({ name, value: this.parseExpression() });
       } else {
         const value = this.parseExpression();
-        if (this.isKw('for')) this.fail('Iterators in function calls (f(x for i in ...)) are not supported');
+        if (this.isKw('for')) {
+          if (args.length || namedArgs.length) this.fail("An iterator argument (f(x for i in ...)) must be the only argument", this.peek());
+          args.push(this.parseIteratorTail(value));
+          this.expectOp(')', 'to close function arguments');
+          break;
+        }
         if (namedArgs.length) this.fail('Positional argument after named argument', this.last());
         args.push(value);
       }
@@ -1025,6 +1035,20 @@ class Parser {
       break;
     }
     return { args, namedArgs };
+  }
+
+  /** After the body expression: `for i in r {, j in s}` (the `in r` part is optional). */
+  private parseIteratorTail(body: Expr): Expr {
+    this.expectKw('for');
+    const iterators: ForIterator[] = [];
+    for (;;) {
+      const it: ForIterator = { name: this.expectIdent('as iterator name').value };
+      if (this.acceptKw('in')) it.range = this.parseExpression();
+      iterators.push(it);
+      if (!this.acceptOp(',')) break;
+    }
+    const loc = body.loc ? span(body.loc, this.last().loc) : undefined;
+    return { kind: 'iterator', body, iterators, ...(loc ? { loc } : {}) };
   }
 
   /** `[ subscript {, subscript} ]` where a subscript is an expression or `:`. */

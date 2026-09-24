@@ -68,9 +68,25 @@ export function workspaceRoutes(ctx: AppContext): Router {
   });
 
   router.get('/:wid/dependencies', (req, res) => {
-    ctx.storage.requireWorkspace(req.params.wid);
-    const body: ItemsResponse<Project> = { data: { items: [ctx.storage.modelicaProject()] } };
+    const body: ItemsResponse<Project> = { data: { items: ctx.storage.dependencyProjects(req.params.wid) } };
     res.json(body);
+  });
+
+  // Add / remove an imported library (Workspace Management → Workspace configuration).
+  router.put('/:wid/dependencies/:lid', (req, res) => {
+    const { wid, lid } = req.params;
+    const project = ctx.storage.addDependency(wid, lid);
+    ctx.registries.invalidate(wid);
+    ctx.log(`workspace ${wid}: library '${project.definition.name}' (${lid}) added`);
+    res.json(project);
+  });
+
+  router.delete('/:wid/dependencies/:lid', (req, res) => {
+    const { wid, lid } = req.params;
+    if (!ctx.storage.removeDependency(wid, lid)) throw notFound(`Library '${lid}' is not a dependency of workspace '${wid}'`);
+    ctx.registries.invalidate(wid);
+    ctx.log(`workspace ${wid}: library ${lid} removed`);
+    res.status(204).end();
   });
 
   // -- library bundles ---------------------------------------------------------------------

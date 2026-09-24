@@ -50,7 +50,8 @@ export function NavBar({ navigate, home, onWorkspaceManagement }: NavBarProps) {
   // Grouped like Impact's Apps menu: uppercase group headers, external items carry an open-in-new icon.
   const appsItems: MenuItem[] = [
     { label: 'Workspace Management', header: true },
-    { label: 'Workspace Configuration', onSelect: onWorkspaceManagement ?? (() => shell.openWorkspaceManagement()) },
+    { label: 'Workspace Configuration', onSelect: onWorkspaceManagement ?? (() => shell.openWorkspaceManagement('configuration')) },
+    ...(home ? [] : [{ label: 'Libraries', onSelect: () => shell.openWorkspaceManagement('libraries') }]),
     { label: 'General Apps', header: true },
     { label: 'Documentation', external: true, onSelect: () => shell.openDocs() },
     { label: 'Tools - Advanced', header: true },

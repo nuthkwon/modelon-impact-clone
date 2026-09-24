@@ -10,16 +10,22 @@
  *   <dataDir>/workspaces/<wid>/experiments/<eid>/cases/<cid>.log    simulation log text
  *   <dataDir>/workspaces/<wid>/model-executables/<fid>.json         ModelExecutableDto
  *   <dataDir>/workspaces/<wid>/model-executables/<fid>.log          compilation log text
+ *   <dataDir>/libraries/<lid>/library.json                          StoredLibrary (imported library)
+ *   <dataDir>/libraries/<lid>/<Lib>/… | <Lib>.mo                    its Modelica sources (read-only)
  *
  * The read-only `Modelica` dependency is served from `<librariesDir>/Modelica/` and is never
- * copied. `<librariesDir>/Examples/` is copied into every new workspace as project `Examples`.
+ * copied. Imported libraries (Workspace Management → Libraries → Import) are installed once
+ * under `<dataDir>/libraries/` and shared: a workspace uses one by listing its id among its
+ * `dependencies`. `<librariesDir>/Examples/` is copied into every new workspace as project `Examples`.
  */
+import fs from 'node:fs';
 import path from 'node:path';
 import type { SimulationResult } from '@impact/core';
-import type { CaseDto, ExperimentDto, ModelExecutableDto, Project, ProjectContent, ProjectType, Workspace, WorkspaceDefinition } from '@impact/protocol';
-import { caseIndex, newContentId, newProjectId, newWorkspaceId } from './ids.js';
+import type { CaseDto, ExperimentDto, InstalledLibraryDto, ModelExecutableDto, Project, ProjectContent, ProjectType, Workspace, WorkspaceDefinition } from '@impact/protocol';
+import { caseIndex, newContentId, newLibraryId, newProjectId, newWorkspaceId } from './ids.js';
 import { copyDirContents, dirSize, ensureDir, exists, isDirectory, isFile, isSafeRelative, listDir, listFilesRecursive, listSubdirs, readJson, readText, removeFile, removeRecursive, writeJsonAtomic, writeTextAtomic } from './fsutil.js';
-import { notFound } from './errors.js';
+import { badRequest, conflict, notFound } from './errors.js';
+import type { CollectedLibrary } from './library-import.js';
 import { isValidId } from './validate.js';
 
 export const MODELICA_LIBRARY_ID = 'modelica';
@@ -43,6 +49,16 @@ export interface StorageOptions {
 interface StoredProject {
   definition: Project['definition'];
   projectType: ProjectType;
+}
+
+/** `library.json` of an imported library. */
+interface StoredLibrary extends StoredProject {
+  version?: string;
+  description?: string;
+  source?: string;
+  importedAt: string;
+  fileCount: number;
+  size: number;
 }
 
 export class Storage {
@@ -137,6 +153,189 @@ export class Storage {
       definition: { name: MODELICA_LIBRARY_NAME, format: FORMAT_VERSION, content, dependencies: [] },
       projectType: 'SYSTEM',
     };
+  }
+
+  // ---------------------------------------------------------------------------------------
+  // Imported libraries (read-only, shared by all workspaces)
+  // ---------------------------------------------------------------------------------------
+
+  get installedLibrariesDir(): string {
+    return path.join(this.dataDir, 'libraries');
+  }
+  installedLibraryDir(lid: string): string {
+    return path.join(this.installedLibrariesDir, lid);
+  }
+  private installedLibraryFile(lid: string): string {
+    return path.join(this.installedLibraryDir(lid), 'library.json');
+  }
+
+  private readInstalledLibrary(lid: string): StoredLibrary | undefined {
+    if (!isValidId(lid) || lid === MODELICA_LIBRARY_ID) return undefined;
+    return readJson<StoredLibrary>(this.installedLibraryFile(lid));
+  }
+
+  /** An imported library as a dependency `Project` (projectType RELEASED, one read-only MODELICA content whose id is the library id). */
+  installedLibraryProject(lid: string): Project | undefined {
+    const stored = this.readInstalledLibrary(lid);
+    return stored ? { id: lid, definition: stored.definition, projectType: stored.projectType } : undefined;
+  }
+
+  /** Ids of the imported libraries, oldest first. */
+  listInstalledLibraryIds(): string[] {
+    return listSubdirs(this.installedLibrariesDir)
+      .map((lid) => ({ lid, stored: this.readInstalledLibrary(lid) }))
+      .filter((x): x is { lid: string; stored: StoredLibrary } => x.stored !== undefined)
+      .sort((a, b) => a.stored.importedAt.localeCompare(b.stored.importedAt) || a.lid.localeCompare(b.lid))
+      .map((x) => x.lid);
+  }
+
+  /** Every library available to workspaces: the Modelica Standard Library first, then the imported ones. */
+  listInstalledLibraries(): InstalledLibraryDto[] {
+    const workspaces = this.listWorkspaces();
+    const usedIn = (lid: string) =>
+      workspaces.filter((ws) => ws.definition.dependencies.some((d) => d.reference.id === lid && !d.disabled)).map((ws) => ({ id: ws.id, name: ws.definition.name }));
+    const msl = this.modelicaProject();
+    const { containerDir, roots } = this.modelicaLibrary();
+    const mslFiles = roots.flatMap((r) => (r.relpath.endsWith('/') ? listFilesRecursive(path.join(containerDir, r.relpath)).filter((f) => f.endsWith('.mo')).map((f) => path.join(containerDir, r.relpath, f)) : [path.join(containerDir, r.relpath)]));
+    const out: InstalledLibraryDto[] = [
+      {
+        id: msl.id,
+        name: MODELICA_LIBRARY_NAME,
+        version: '4.0.0',
+        description: 'Modelica Standard Library (subset)',
+        projectType: 'SYSTEM',
+        fileCount: mslFiles.length,
+        size: mslFiles.reduce((n, f) => n + fileSize(f), 0),
+        usedIn: usedIn(msl.id),
+      },
+    ];
+    for (const lid of this.listInstalledLibraryIds()) {
+      const stored = this.readInstalledLibrary(lid)!;
+      out.push({
+        id: lid,
+        name: stored.definition.name,
+        ...(stored.version ? { version: stored.version } : {}),
+        ...(stored.description ? { description: stored.description } : {}),
+        projectType: stored.projectType,
+        ...(stored.source ? { source: stored.source } : {}),
+        importedAt: stored.importedAt,
+        fileCount: stored.fileCount,
+        size: stored.size,
+        usedIn: usedIn(lid),
+      });
+    }
+    return out;
+  }
+
+  /** Installs a collected library under a new id. Library names are unique among the installed libraries. */
+  installLibrary(lib: CollectedLibrary, source: string): Project {
+    if (lib.name === MODELICA_LIBRARY_NAME) throw conflict(`The Modelica Standard Library is built in and cannot be imported`);
+    const existing = this.listInstalledLibraryIds().find((lid) => this.readInstalledLibrary(lid)?.definition.name === lib.name);
+    if (existing) throw conflict(`A library named '${lib.name}' is already installed; delete it first to import it again`, { libraryId: existing });
+    if (!lib.files.some((f) => f.path === lib.relpath || f.path === `${lib.relpath}package.mo`)) throw badRequest(`The library '${lib.name}' has no top-level file`);
+    const lid = newLibraryId();
+    const dir = this.installedLibraryDir(lid);
+    const tmp = `${dir}.tmp`;
+    removeRecursive(tmp);
+    try {
+      for (const f of lib.files) {
+        if (!isSafeRelative(f.path)) throw badRequest(`Invalid file path '${f.path}'`);
+        writeTextAtomic(path.join(tmp, f.path), f.text);
+      }
+    } catch (e) {
+      removeRecursive(tmp);
+      throw e;
+    }
+    const stored: StoredLibrary = {
+      definition: {
+        name: lib.name,
+        format: FORMAT_VERSION,
+        content: [{ id: lid, relpath: lib.relpath, contentType: 'MODELICA', name: lib.name, defaultDisabled: false, readOnly: true }],
+        dependencies: [{ name: MODELICA_LIBRARY_NAME }],
+      },
+      projectType: 'RELEASED',
+      ...(lib.version ? { version: lib.version } : {}),
+      ...(lib.description ? { description: lib.description } : {}),
+      source,
+      importedAt: new Date().toISOString(),
+      fileCount: lib.files.filter((f) => f.path.endsWith('.mo')).length,
+      size: lib.files.reduce((n, f) => n + Buffer.byteLength(f.text), 0),
+    };
+    writeJsonAtomic(path.join(tmp, 'library.json'), stored);
+    renameDir(tmp, dir);
+    return { id: lid, definition: stored.definition, projectType: stored.projectType };
+  }
+
+  /** Deletes an imported library and removes it from every workspace. Returns the ids of the workspaces that used it. */
+  deleteInstalledLibrary(lid: string): string[] {
+    if (lid === MODELICA_LIBRARY_ID) throw badRequest('The Modelica Standard Library cannot be deleted');
+    if (!this.readInstalledLibrary(lid)) throw notFound(`Library '${lid}' not found`);
+    const affected: string[] = [];
+    for (const ws of this.listWorkspaces()) {
+      if (!ws.definition.dependencies.some((d) => d.reference.id === lid)) continue;
+      this.writeDependencies(ws.id, ws.definition.dependencies.filter((d) => d.reference.id !== lid));
+      affected.push(ws.id);
+    }
+    removeRecursive(this.installedLibraryDir(lid));
+    return affected;
+  }
+
+  // ---------------------------------------------------------------------------------------
+  // Workspace dependencies
+  // ---------------------------------------------------------------------------------------
+
+  /** The workspace's read-only dependencies in load order: Modelica, then its enabled imported libraries. */
+  dependencyProjects(wid: string): Project[] {
+    const ws = this.requireWorkspace(wid);
+    const out: Project[] = [this.modelicaProject()];
+    for (const dep of ws.definition.dependencies) {
+      if (dep.disabled || dep.reference.id === MODELICA_LIBRARY_ID) continue;
+      const p = this.installedLibraryProject(dep.reference.id);
+      if (p) out.push(p);
+    }
+    return out;
+  }
+
+  /** Adds an imported library to the workspace's dependencies (no-op when already there). */
+  addDependency(wid: string, lid: string): Project {
+    const ws = this.requireWorkspace(wid);
+    const project = this.installedLibraryProject(lid);
+    if (!project) throw notFound(`Library '${lid}' not found`);
+    const deps = ws.definition.dependencies;
+    const present = deps.find((d) => d.reference.id === lid);
+    if (present && !present.disabled) return project;
+    this.assertTopLevelNamesFree(wid, project.definition.content.filter((c) => c.contentType === 'MODELICA').map((c) => c.name));
+    this.writeDependencies(wid, present ? deps.map((d) => (d.reference.id === lid ? { ...d, disabled: false } : d)) : [...deps, { reference: { id: lid }, disabled: false }]);
+    return project;
+  }
+
+  /** Top-level class names must stay unique within a workspace: throws 409 when one of `names` is already loaded. */
+  assertTopLevelNamesFree(wid: string, names: string[]): void {
+    const owners = new Map<string, string>();
+    for (const p of [...this.dependencyProjects(wid), ...this.editableProjects(wid)]) {
+      for (const c of p.definition.content) if (c.contentType === 'MODELICA') owners.set(c.name, p.definition.name);
+    }
+    for (const name of names) {
+      const owner = owners.get(name);
+      if (owner !== undefined) throw conflict(`'${name}' is already loaded in this workspace${owner !== name ? ` (from '${owner}')` : ''}`);
+    }
+  }
+
+  /** Removes an imported library from the workspace's dependencies. Returns false when it was not there. */
+  removeDependency(wid: string, lid: string): boolean {
+    if (lid === MODELICA_LIBRARY_ID) throw badRequest('The Modelica Standard Library is always loaded and cannot be removed');
+    const ws = this.requireWorkspace(wid);
+    if (!ws.definition.dependencies.some((d) => d.reference.id === lid)) return false;
+    this.writeDependencies(wid, ws.definition.dependencies.filter((d) => d.reference.id !== lid));
+    return true;
+  }
+
+  private writeDependencies(wid: string, dependencies: WorkspaceDefinition['dependencies']): void {
+    const definition = readJson<WorkspaceDefinition>(this.workspaceFile(wid));
+    if (!definition) throw notFound(`Workspace '${wid}' not found`);
+    definition.dependencies = dependencies;
+    definition.updatedAt = new Date().toISOString();
+    writeJsonAtomic(this.workspaceFile(wid), definition);
   }
 
   // ---------------------------------------------------------------------------------------
@@ -510,6 +709,23 @@ export function discoverRoots(dir: string): LibraryRoot[] {
     }
   }
   return roots;
+}
+
+function fileSize(p: string): number {
+  try {
+    return fs.statSync(p).size;
+  } catch {
+    return 0;
+  }
+}
+
+function renameDir(from: string, to: string): void {
+  try {
+    fs.renameSync(from, to);
+  } catch (e) {
+    removeRecursive(from);
+    throw e;
+  }
 }
 
 function rootToContent(root: LibraryRoot, id: string): ProjectContent {

@@ -58,7 +58,19 @@ export type Expr =
   /** `1:n` or `1:2:n` */
   | { kind: 'range'; start: Expr; step?: Expr; end: Expr; loc?: SourceLoc }
   /** The `end` keyword inside a subscript. */
-  | { kind: 'end'; loc?: SourceLoc };
+  | { kind: 'end'; loc?: SourceLoc }
+  /**
+   * `e for i in r, j in s` — the body of an array constructor (`{e for i in r}`, stored as the
+   * only element of an `array`) or a reduction argument (`sum(e for i in r)`, the only positional
+   * argument of a `call`). Parsed so libraries using it load; the flattener rejects it.
+   */
+  | { kind: 'iterator'; body: Expr; iterators: ForIterator[]; loc?: SourceLoc };
+
+/** `i in 1:n`; the range may be omitted (`for i` — deduced from the body). */
+export interface ForIterator {
+  name: string;
+  range?: Expr;
+}
 
 export interface NamedArg {
   name: string;
@@ -177,6 +189,12 @@ export interface ClassDef {
    * Short class definition, e.g. `type Voltage = Real(unit="V");` or
    * `connector RealInput = input Real;`
    */
+  /**
+   * `redeclare record extends Name(mods) ... end Name;` — an extends class specifier: the class
+   * extends the inherited class of the same name. Parsed so libraries using it load; the
+   * flattener rejects it.
+   */
+  classExtends?: { modification?: Modification };
   shortClass?: {
     typeName: string;
     modification?: Modification;

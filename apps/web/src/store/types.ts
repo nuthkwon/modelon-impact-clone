@@ -35,6 +35,12 @@ export interface WorkspaceSlice {
   loadError?: string;
 
   loadWorkspace(wid: string): Promise<void>;
+  /**
+   * Re-reads the workspace's dependencies after a library was added, removed or deleted
+   * (Workspace Management) and swaps the read-only libraries in the registry; editable
+   * projects, the open class and the edit history are kept.
+   */
+  reloadLibraries(): Promise<void>;
   /** Saves new text for the file that declares `className`; updates the registry on success. Returns diagnostics on parse errors (nothing saved). */
   saveClassSource(className: string, text: string): Promise<{ ok: boolean; diagnostics: Diagnostic[] }>;
   createClass(req: { className: string; restriction: 'model' | 'package' | 'block' | 'connector' | 'record' | 'type' | 'function'; description?: string; extendsClass?: string; libraryId?: string }): Promise<string>;

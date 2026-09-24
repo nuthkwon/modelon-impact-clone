@@ -42,6 +42,10 @@ export function forEachRef(e: Expr | undefined, fn: RefVisitor): void {
       forEachRef(e.step, fn);
       forEachRef(e.end, fn);
       return;
+    case 'iterator':
+      forEachRef(e.body, fn);
+      for (const it of e.iterators) forEachRef(it.range, fn);
+      return;
     default:
       return;
   }

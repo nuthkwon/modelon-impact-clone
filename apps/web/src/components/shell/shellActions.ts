@@ -10,6 +10,7 @@
  *
  * `shellActions` gives the same API outside React (e.g. from store code or event handlers).
  */
+import type { WorkspaceManagementTab } from '../workspace-management/WorkspaceManagementDialog';
 import { create } from 'zustand';
 import { useStore } from '../../store';
 
@@ -33,7 +34,7 @@ export type ShellDialog =
   | { kind: 'about' }
   | { kind: 'docs' }
   | { kind: 'support' }
-  | { kind: 'workspaceManagement' }
+  | { kind: 'workspaceManagement'; tab?: WorkspaceManagementTab }
   | { kind: 'text'; title: string; text: string };
 
 export interface ShellActions {
@@ -53,8 +54,8 @@ export interface ShellActions {
   openDocs(): void;
   /** Help → Support. */
   openSupport(): void;
-  /** Apps → Workspace Management (projects and dependencies of the open workspace). */
-  openWorkspaceManagement(): void;
+  /** Workspace Management (Apps menu, or the "Configure workspace" cogwheel): configuration and installed libraries. */
+  openWorkspaceManagement(tab?: WorkspaceManagementTab): void;
   /** Generic read-only text dialog. */
   openText(title: string, text: string): void;
   /** Switches to the Code view and selects/scrolls to `line` (1-based). */
@@ -127,8 +128,8 @@ export const useShellStore = create<ShellState>()((set, get) => {
     openSupport() {
       set({ dialog: { kind: 'support' } });
     },
-    openWorkspaceManagement() {
-      set({ dialog: { kind: 'workspaceManagement' } });
+    openWorkspaceManagement(tab) {
+      set({ dialog: { kind: 'workspaceManagement', ...(tab ? { tab } : {}) } });
     },
     openText(title, text) {
       set({ dialog: { kind: 'text', title, text } });

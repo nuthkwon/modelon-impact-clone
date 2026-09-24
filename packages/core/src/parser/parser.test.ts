@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { E, ModelicaError, type ClassDef, type Equation, type Expr } from '../ast.js';
 import { parse, parseExpression, parseModification } from './parser.js';
-import { printExpr } from './printer.js';
+import { printExpr, printStoredDefinition } from './printer.js';
 
 /** Removes `loc`/`nameLoc` recursively so ASTs can be compared structurally. */
 function stripLoc<T>(value: T): T {
@@ -573,9 +573,28 @@ describe('expressions', () => {
     expect(() => parseExpression('a +')).toThrow(/Expected expression but found end of file \(line 1, column 4\)/);
     expect(() => parseExpression('a b')).toThrow(/Expected end of input after expression but found 'b'/);
     expect(() => parseExpression('f(a=1, 2)')).toThrow(/Positional argument after named argument/);
-    expect(() => parseExpression('{x for x in 1:3}')).toThrow(/Array comprehensions .* are not supported/);
-    expect(() => parseExpression('sum(x[i] for i in 1:3)')).toThrow(/Iterators in function calls .* are not supported/);
+    expect(() => parseExpression('sum(a, x[i] for i in 1:3)')).toThrow(/An iterator argument .* must be the only argument/);
+    expect(() => parseExpression('sum(x[i] for i in 1:3, 2)')).toThrow(/Expected identifier as iterator name but found '2'/);
     expect(() => parseExpression('()')).toThrow(/Expected expression inside parentheses/);
+  });
+
+  it('parses array constructors and reduction arguments with iterators', () => {
+    expect(parseExpression('{2*i for i in 1:3}')).toMatchObject({
+      kind: 'array',
+      elements: [{ kind: 'iterator', body: { kind: 'binary', op: '*' }, iterators: [{ name: 'i', range: { kind: 'range' } }] }],
+    });
+    expect(parseExpression('sum(x[i, j] for i in 1:n, j)')).toMatchObject({
+      kind: 'call',
+      callee: 'sum',
+      args: [{ kind: 'iterator', iterators: [{ name: 'i', range: { kind: 'range' } }, { name: 'j' }] }],
+      namedArgs: [],
+    });
+    for (const text of ['{2 * i for i in 1:3}', 'sum(x[i, j] for i in 1:n, j)', 'max(if b[i] then 1 else 0 for i in 1:3)', '{{i * j for i in 1:2} for j in 1:3}']) {
+      const e = parseExpression(text);
+      expect(parseExpression(printExpr(e))).toEqual(parseExpression(printExpr(parseExpression(printExpr(e)))));
+    }
+    expect(printExpr(parseExpression('sum(x[i] for i in 1:3)'))).toBe('sum(x[i] for i in 1:3)');
+    expect(printExpr(parseExpression('{i for i in 1:3}'))).toBe('{i for i in 1:3}');
   });
 
   it('rejects function calls through subscripted component references instead of dropping the subscripts', () => {
@@ -586,6 +605,24 @@ describe('expressions', () => {
     expect(parseExpression('a.f(x)')).toMatchObject({ kind: 'call', callee: 'a.f' });
     expect(printExpr(parseExpression('a[1].b'))).toBe('a[1].b');
     expect(printExpr(parseExpression('f(a[1].b)'))).toBe('f(a[1].b)');
+  });
+});
+
+describe('extends class specifiers', () => {
+  it('parses `redeclare record extends Name(mods) ... end Name;` and prints it back', () => {
+    const text = [
+      'package P',
+      '  redeclare record extends ThermodynamicState(p(start=1)) "Thermodynamic state"',
+      '    Real T;',
+      '  end ThermodynamicState;',
+      'end P;',
+    ].join('\n');
+    const cls = parse(text).classes[0].classes[0];
+    expect(cls).toMatchObject({ name: 'ThermodynamicState', restriction: 'record', description: 'Thermodynamic state', classExtends: { modification: { mods: [{ name: 'p' }] } } });
+    expect(cls.components.map((c) => c.name)).toEqual(['T']);
+    const printed = printStoredDefinition(parse(text));
+    expect(printed).toContain('record extends ThermodynamicState(p(start=1)) "Thermodynamic state"');
+    expect(printStoredDefinition(parse(printed))).toBe(printed);
   });
 });
 
@@ -603,7 +640,7 @@ describe('error messages', () => {
     expectParseError('model M\n  Real x(start=1;\nend M;', "Expected ')' to close modification but found ';' (line 2, column 17)");
     expectParseError('foo', "Expected class definition but found 'foo' (line 1, column 1)");
     expectParseError('model M\n  Real 1x;\nend M;', /Malformed number '1x'/);
-    expectParseError('model M\n  model extends Base\n  end Base;\nend M;', "'extends' class specifiers ('model extends Base ... end Base;') are not supported (line 2, column 9)");
+    expectParseError('model M\n  model extends Base\n  end Other;\nend M;', "Expected 'end Base' but found 'end Other' (line 3, column 7)");
   });
 
   it('exposes diagnostics through ModelicaError', () => {

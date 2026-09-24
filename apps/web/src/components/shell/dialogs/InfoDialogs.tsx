@@ -1,5 +1,4 @@
-/** Small informational dialogs: Documentation, Support, generic text, Workspace Management. */
-import { useStore } from '../../../store';
+/** Small informational dialogs: Documentation, Support, generic text. */
 import { Dialog } from '../../common/Dialog';
 import '../shell.css';
 
@@ -44,62 +43,6 @@ export function TextDialog({ title, text, onClose }: { title: string; text: stri
   return (
     <Dialog open title={title} onClose={onClose} width={520} className="text-dialog" actions={closeAction(onClose)}>
       <pre>{text}</pre>
-    </Dialog>
-  );
-}
-
-export function WorkspaceManagementDialog({ onClose }: { onClose: () => void }) {
-  const workspace = useStore((s) => s.workspace);
-  const projects = useStore((s) => s.projects);
-  const dependencies = useStore((s) => s.dependencies);
-  return (
-    <Dialog open title="Workspace Management" onClose={onClose} width={560} actions={closeAction(onClose)}>
-      {!workspace ? (
-        <p className="settings-note">Open a workspace to see its projects and dependencies.</p>
-      ) : (
-        <>
-          <p className="settings-note">
-            Workspace <strong>{workspace.definition.name}</strong> ({workspace.id}). Projects are editable; dependencies are read-only libraries. Configuration is read-only in this clone.
-          </p>
-          <div className="section-title" style={{ padding: '4px 0' }}>Projects</div>
-          <div className="mgmt-list">
-            {projects.length === 0 && <div className="settings-note">No projects.</div>}
-            {projects.map((p) => (
-              <div key={p.id} className="mgmt-project">
-                <div className="mgmt-name">
-                  {p.definition.name} <span className="mgmt-badge">{p.projectType}</span>
-                </div>
-                <div className="mgmt-meta">{p.id}</div>
-                <ul>
-                  {p.definition.content.map((c) => (
-                    <li key={c.id}>
-                      {c.name} <span className="mgmt-meta">({c.contentType.toLowerCase()}, {c.relpath}{c.readOnly ? ', read-only' : ''})</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </div>
-          <div className="section-title" style={{ padding: '12px 0 4px' }}>Dependencies</div>
-          <div className="mgmt-list">
-            {dependencies.length === 0 && <div className="settings-note">No dependencies.</div>}
-            {dependencies.map((p) => (
-              <div key={p.id} className="mgmt-project">
-                <div className="mgmt-name">
-                  {p.definition.name} <span className="mgmt-badge">{p.projectType}</span>
-                </div>
-                <ul>
-                  {p.definition.content.map((c) => (
-                    <li key={c.id}>
-                      {c.name} <span className="mgmt-meta">({c.relpath})</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </div>
-        </>
-      )}
     </Dialog>
   );
 }

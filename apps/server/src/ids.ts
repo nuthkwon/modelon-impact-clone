@@ -13,6 +13,7 @@ export function shortId(prefix: string, length = 10): string {
 export const newWorkspaceId = () => shortId('ws_');
 export const newProjectId = () => shortId('prj_');
 export const newContentId = () => shortId('cnt_');
+export const newLibraryId = () => shortId('lib_');
 export const newExperimentId = () => shortId('exp_');
 export const newExecutableId = () => shortId('fmu_');
 export const caseId = (index: number) => `case_${index}`;

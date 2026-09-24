@@ -118,12 +118,5 @@
 .docs-dialog li { margin: 2px 0; }
 .text-dialog pre { font-family: var(--font-mono); font-size: 12px; white-space: pre-wrap; margin: 0; }
 
-.mgmt-list { display: flex; flex-direction: column; gap: 8px; }
-.mgmt-project { border-radius: var(--radius-card); padding: 10px 14px; background: var(--surface-2); }
-.mgmt-project .mgmt-name { font-weight: 600; display: flex; align-items: center; gap: 8px; }
-.mgmt-project .mgmt-meta { color: var(--text-label); font-size: 12px; }
-.mgmt-project ul { margin: 6px 0 0; padding-left: 18px; font-size: 12px; }
-.mgmt-badge { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; border: 1px solid var(--border-strong); border-radius: 10px; padding: 0 6px; color: var(--text-secondary); line-height: 16px; }
-
 .contained-button.danger { background: var(--error); color: #fff; }
 .contained-button.danger:hover:not(:disabled) { background: color-mix(in srgb, var(--error) 85%, black); }

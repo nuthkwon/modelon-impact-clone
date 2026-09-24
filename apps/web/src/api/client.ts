@@ -18,6 +18,9 @@ import type {
   ExecutionStatusResponse,
   ExperimentDto,
   ExperimentVariablesResponse,
+  FileSystemListing,
+  ImportLibraryRequest,
+  InstalledLibraryDto,
   ItemsResponse,
   LibraryBundleDto,
   ModelExecutableDto,
@@ -81,7 +84,15 @@ export const remoteApi = {
   listDependencies: (wid: string) => request<ItemsResponse<Project>>(API.dependencies(wid)),
   listLibraries: (wid: string) => request<ItemsResponse<LibraryBundleDto>>(API.libraries(wid)),
   getLibrary: (wid: string, lid: string) => request<LibraryBundleDto>(API.library(wid, lid)),
+  addDependency: (wid: string, lid: string) => request<Project>(API.dependency(wid, lid), { method: 'PUT' }),
+  removeDependency: (wid: string, lid: string) => request<void>(API.dependency(wid, lid), { method: 'DELETE' }),
   getDiagnostics: (wid: string) => request<{ items: { libraryId: string; path: string; diagnostics: Diagnostic[] }[] }>(`/api/workspaces/${wid}/diagnostics`),
+
+  // installed libraries (Workspace Management → Libraries) and the server file browser
+  listInstalledLibraries: () => request<ItemsResponse<InstalledLibraryDto>>(API.installedLibraries()),
+  importLibrary: (req: ImportLibraryRequest) => request<InstalledLibraryDto>(API.installedLibraries(), json(req)),
+  deleteInstalledLibrary: (lid: string) => request<void>(API.installedLibrary(lid), { method: 'DELETE' }),
+  browseFilesystem: (path?: string) => request<FileSystemListing>(API.filesystem(path)),
 
   // classes
   classTree: (wid: string, parent?: string, q?: string) =>

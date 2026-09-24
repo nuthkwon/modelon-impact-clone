@@ -12,7 +12,6 @@ import { useShellActions } from '../shell/shellActions';
 import { useStore } from '../../store';
 import { ClassTree } from './ClassTree';
 import type { TreeFilter } from './ClassTree';
-import { ConfigureWorkspaceDialog } from './ConfigureWorkspaceDialog';
 import { LimitLibrariesPopover } from './LimitLibrariesPopover';
 import { useClassActions } from './classActions';
 import { useDebounced, useSessionSet } from './hooks';
@@ -30,7 +29,6 @@ export function WorkspacePanel(): JSX.Element {
   const debouncedQuery = useDebounced(query, 150);
   const [hiddenLibraries, setHiddenLibraries] = useSessionSet(`impact-clone:${workspaceId ?? 'none'}:workspace-panel:hidden-libraries`);
   const [limitOpen, setLimitOpen] = useState(false);
-  const [configureOpen, setConfigureOpen] = useState(false);
   const filterInputRef = useRef<HTMLInputElement>(null);
   const cacheRef = useRef(createChildrenCache());
 
@@ -51,7 +49,7 @@ export function WorkspacePanel(): JSX.Element {
     return { query: q, visible: withAncestors(matches.map((m) => m.name)), matchCount: matches.length, truncated: matches.length >= MAX_MATCHES };
   }, [debouncedQuery, registry, registryVersion, hiddenLibraries]);
 
-  const openConfigure = useCallback(() => setConfigureOpen(true), []);
+  const openConfigure = useCallback(() => shell.openWorkspaceManagement('configuration'), [shell]);
   const actions = useClassActions({ onConfigureWorkspace: openConfigure });
   const onContextMenu = useCallback(
     (e: React.MouseEvent, node: ClassTreeNode, isProjectRoot: boolean) => actions.openMenu(e, node, isProjectRoot),
@@ -151,7 +149,6 @@ export function WorkspacePanel(): JSX.Element {
         onContextMenu={onContextMenu}
         headerActions={headerActions}
       />
-      <ConfigureWorkspaceDialog open={configureOpen} onClose={() => setConfigureOpen(false)} />
       {actions.dialog}
     </div>
   );

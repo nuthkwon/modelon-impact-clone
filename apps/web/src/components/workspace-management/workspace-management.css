@@ -1,0 +1,81 @@
+/* Workspace Management dialog and the Import library explorer. */
+
+.wm-dialog .wm-body { padding: 0 24px 8px; display: flex; flex-direction: column; min-height: 420px; }
+.wm-tabs { flex: none; margin: 0 -24px 8px; padding: 0 12px; }
+.wm-tabs .tab { flex: none; padding: 0 16px; }
+.wm-tab-body { flex: 1; min-height: 0; }
+
+.wm-status { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-secondary); padding: 6px 10px; border-radius: var(--radius); background: var(--surface-2); margin-bottom: 8px; }
+.wm-status.success { color: var(--success); }
+.wm-error { font-size: 12px; color: var(--error); background: var(--error-bg); padding: 6px 10px; border-radius: var(--radius); margin: 4px 0 8px; white-space: pre-wrap; }
+.wm-note { font-size: 12px; color: var(--text-label); }
+.wm-section { padding-left: 0; padding-right: 0; }
+
+.wm-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.wm-empty { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-label); padding: 6px 2px; }
+.wm-item { display: flex; align-items: center; gap: 10px; padding: 8px 10px 8px 12px; border-radius: var(--radius-card); background: var(--surface-2); min-height: 44px; }
+.wm-item-icon { flex: none; color: var(--accent); }
+.wm-item-grip { flex: none; color: var(--text-disabled); }
+.wm-item.draggable { cursor: grab; }
+.wm-item-main { flex: 1; min-width: 0; }
+.wm-item-name { font-weight: 600; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.wm-item-meta { font-size: 12px; color: var(--text-label); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wm-item-lock { display: inline-flex; color: var(--text-disabled); padding: 0 8px; }
+.wm-version { font-weight: 400; font-size: 12px; color: var(--text-secondary); }
+.wm-badge { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; border: 1px solid var(--border-strong); border-radius: 10px; padding: 0 6px; color: var(--text-secondary); line-height: 16px; }
+.wm-chip { font-size: 10px; font-weight: 600; letter-spacing: 0.04em; border-radius: 10px; padding: 0 7px; line-height: 16px; background: var(--hover); color: var(--text-secondary); white-space: nowrap; }
+.wm-chip.accent { background: var(--selection-bg); color: var(--accent); }
+
+/* Workspace configuration */
+.wm-config { display: flex; gap: 20px; }
+.wm-config-main { flex: 1; min-width: 0; }
+.wm-config-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 4px 0 4px; }
+.wm-config-head .outlined-button, .wm-config-head .contained-button { display: inline-flex; align-items: center; gap: 6px; }
+.wm-ws-name { font-size: 16px; font-weight: 600; }
+.wm-deps { border-radius: var(--radius-card); transition: background 0.1s; }
+.wm-deps.droppable { padding: 6px; margin: 0 -6px; border: 1px dashed transparent; }
+.wm-deps.drop-active { background: var(--dropzone-bg); border-color: var(--dropzone-border); }
+.wm-dropzone { font-size: 12px; color: var(--text-label); text-align: center; padding: 10px; border: 1px dashed var(--dropzone-border); border-radius: var(--radius-card); background: var(--dropzone-bg); }
+.wm-deps + .wm-note { margin-top: 12px; }
+.wm-available { width: 320px; flex: none; border-left: 1px solid var(--border); padding-left: 20px; display: flex; flex-direction: column; }
+.wm-available .wm-list { overflow: auto; max-height: 360px; }
+.wm-filter { display: flex; align-items: center; gap: 6px; color: var(--text-label); margin-bottom: 8px; }
+.wm-filter .text-field { flex: 1; }
+.wm-import-link { align-self: flex-start; margin-top: 10px; display: inline-flex; align-items: center; gap: 6px; }
+
+/* Libraries tab */
+.wm-libraries-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 4px 0 12px; }
+.wm-libraries-head .contained-button { display: inline-flex; align-items: center; gap: 6px; flex: none; }
+.wm-library { align-items: flex-start; }
+.wm-library .wm-item-icon { margin-top: 2px; }
+
+/* Import library explorer */
+.wm-import-dialog .wm-import-body { display: flex; flex-direction: column; gap: 8px; }
+.wm-import-bar { display: flex; align-items: center; gap: 4px; }
+.wm-import-path { flex: 1; font-family: var(--font-mono); font-size: 12px; }
+.wm-import-roots { width: auto; flex: none; }
+.wm-import-list { height: 340px; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius); outline: none; }
+.wm-import-list:focus-visible { box-shadow: 0 0 0 2px var(--focus); }
+.wm-import-head, .wm-import-row { display: grid; grid-template-columns: minmax(0, 1fr) 170px 80px; align-items: center; gap: 8px; padding: 0 10px; }
+.wm-import-head { position: sticky; top: 0; z-index: 1; height: 28px; background: var(--surface-2); border-bottom: 1px solid var(--border); font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-secondary); }
+.wm-import-row { height: 30px; cursor: default; user-select: none; font-size: 13px; }
+.wm-import-row:hover { background: var(--hover); }
+.wm-import-row.selected { background: var(--selection-bg); }
+.wm-import-row.package-file .wm-import-label { font-weight: 600; }
+.wm-import-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.wm-import-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wm-import-date, .wm-import-size { font-size: 12px; color: var(--text-label); white-space: nowrap; }
+.wm-import-size { text-align: right; }
+.wm-icon-folder { color: var(--text-secondary); flex: none; }
+.wm-icon-package { color: var(--accent); flex: none; }
+.wm-icon-file { color: var(--text-label); flex: none; }
+.wm-import-empty { display: flex; align-items: center; gap: 8px; padding: 16px; font-size: 12px; color: var(--text-label); }
+.wm-import-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 28px; }
+.wm-import-hint { font-size: 12px; color: var(--text-label); }
+.wm-import-hint.ready { color: var(--accent); }
+.wm-check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; white-space: nowrap; }
+.wm-import-progress { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-secondary); }
+.wm-import-disabled { display: flex; gap: 10px; align-items: flex-start; padding: 16px; border-radius: var(--radius-card); background: var(--surface-2); font-size: 13px; color: var(--text-secondary); }
+.wm-import-dialog .dialog-actions { align-items: center; }
+.wm-upload-button { display: inline-flex; align-items: center; gap: 6px; }
+.wm-actions-spacer { flex: 1; }
