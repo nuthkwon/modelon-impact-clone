@@ -30,6 +30,8 @@ export interface PropertiesTabProps {
   readOnly: boolean;
 }
 
+const NO_FAVORITES: string[] = [];
+
 interface Chips {
   parameters: boolean;
   results: boolean;
@@ -73,7 +75,7 @@ export function PropertiesTab({ activeClass, component, mode, readOnly }: Proper
   const setModifier = useStore((s) => s.setModifier);
   const toggleFavorite = useStore((s) => s.toggleFavorite);
   const addSticky = useStore((s) => s.addSticky);
-  const favorites = useStore((s) => s.favorites[activeClass]) ?? [];
+  const favorites = useStore((s) => s.favorites[activeClass]) ?? NO_FAVORITES;
   const showDisplayUnits = useStore((s) => s.settings.showDisplayUnits);
   const experiments = useStore((s) => s.experiments);
   const activeExperimentId = useStore((s) => s.activeExperiment[activeClass]);
@@ -198,7 +200,7 @@ export function PropertiesTab({ activeClass, component, mode, readOnly }: Proper
                       const attributeValues = Object.fromEntries(ATTRIBUTE_NAMES.map((a) => [a, attributeValue(p, a, params, experimentModifiers, componentName)])) as Record<AttributeName, string | undefined>;
                       return (
                         <ParameterRow
-                          key={p.name}
+                          key={fullName}
                           p={p}
                           fullName={fullName}
                           mode={mode}

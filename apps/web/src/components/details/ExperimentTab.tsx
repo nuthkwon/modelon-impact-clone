@@ -87,6 +87,7 @@ function ExperimentRow({ exp, active, onlyOne }: { exp: Experiment; active: bool
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState(exp.name);
   const inputRef = useRef<HTMLInputElement>(null);
+  const doneRef = useRef(false);
   const cases = caseCount(exp.id);
 
   useEffect(() => {
@@ -98,12 +99,15 @@ function ExperimentRow({ exp, active, onlyOne }: { exp: Experiment; active: bool
 
   const startRename = () => {
     setDraft(exp.name);
+    doneRef.current = false;
     setRenaming(true);
   };
-  const commitRename = () => {
-    const name = draft.trim();
+  const finishRename = (commit: boolean) => {
+    if (doneRef.current) return;
+    doneRef.current = true;
     setRenaming(false);
-    if (name && name !== exp.name) renameExperiment(exp.id, name);
+    const name = draft.trim();
+    if (commit && name && name !== exp.name) renameExperiment(exp.id, name);
   };
   const remove = async () => {
     const ok = await shell.confirm({ title: 'Delete experiment?', message: `Delete "${exp.name}" permanently?`, confirmLabel: 'Delete', danger: true });
@@ -139,11 +143,11 @@ function ExperimentRow({ exp, active, onlyOne }: { exp: Experiment; active: bool
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onClick={(e) => e.stopPropagation()}
-          onBlur={commitRename}
+          onBlur={() => finishRename(true)}
           onKeyDown={(e) => {
             e.stopPropagation();
-            if (e.key === 'Enter') commitRename();
-            else if (e.key === 'Escape') setRenaming(false);
+            if (e.key === 'Enter') finishRename(true);
+            else if (e.key === 'Escape') finishRename(false);
           }}
           aria-label="Experiment name"
         />
@@ -195,14 +199,14 @@ function AnalysisPanel({ exp }: { exp: Experiment }) {
   return (
     <div className="analysis-panel">
       <div className="analysis-types" role="radiogroup" aria-label="Analysis type">
-        <button type="button" role="radio" aria-checked={a.type === 'dynamic'} className={`analysis-type${a.type === 'dynamic' ? ' active' : ''}`} onClick={() => update({ type: 'dynamic' })}>
+        <button type="button" role="radio" aria-checked={a.type === 'dynamic'} className={`analysis-type analysis-type--first${a.type === 'dynamic' ? ' active' : ''}`} onClick={() => update({ type: 'dynamic' })}>
           Dynamic
         </button>
         <button type="button" role="radio" aria-checked={a.type === 'steady state'} className={`analysis-type${a.type === 'steady state' ? ' active' : ''}`} onClick={() => update({ type: 'steady state' })}>
           Steady-State
         </button>
         <Tooltip text="No custom functions installed">
-          <button type="button" role="radio" aria-checked={false} className="analysis-type" disabled>
+          <button type="button" role="radio" aria-checked={false} className="analysis-type analysis-type--last" disabled>
             Custom
           </button>
         </Tooltip>
@@ -221,7 +225,7 @@ function AnalysisPanel({ exp }: { exp: Experiment }) {
               <>
                 <span>{a.useInterval ? 'Interval' : 'Points'}</span>
                 <Switch on={a.useInterval} onToggle={() => update({ useInterval: !a.useInterval })} ariaLabel="Toggle between Interval and Points" />
-                <span className="switch-label">{a.useInterval ? 'interval' : 'points'}</span>
+                <span className="details-switch-label">{a.useInterval ? 'interval' : 'points'}</span>
               </>
             }
             unit={a.useInterval ? 's' : ''}

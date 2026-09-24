@@ -70,7 +70,7 @@ export function DetailsPanel(): JSX.Element {
           </ul>
         </div>
       ) : (
-        <PropertiesTab key={`${activeClass}/${component?.name ?? ''}/${mode}`} activeClass={activeClass} component={component} mode={mode} readOnly={readOnly} />
+        <PropertiesTab activeClass={activeClass} component={component} mode={mode} readOnly={readOnly} />
       );
       break;
     case 'INFORMATION':

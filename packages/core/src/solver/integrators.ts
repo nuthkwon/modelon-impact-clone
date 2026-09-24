@@ -18,6 +18,7 @@
  */
 import { ModelicaError } from '../ast.js';
 import type { SimulationOptions, SolverName } from '../simulation.js';
+import { normalizeSolverName } from '../simulation.js';
 import { wrmsNorm } from './linalg.js';
 import type { NewtonResult } from './newton.js';
 import { fmt, type System } from './system.js';
@@ -41,7 +42,9 @@ export interface Integrator {
 }
 
 export function createIntegrator(name: SolverName, sys: System, options: SimulationOptions): Integrator {
-  switch (name) {
+  const canonical = normalizeSolverName(name);
+  if (!canonical) throw new ModelicaError(`Unknown solver '${String(name)}'`);
+  switch (canonical) {
     case 'CVode':
       return new VariableStepImplicit(sys, options, 'bdf', name);
     case 'Radau5':
@@ -141,7 +144,6 @@ class VariableStepImplicit extends BaseIntegrator {
   private stepsSinceRestart = 0;
   private tPrev = 0;
   private readonly vPrev: Float64Array;
-  private readonly dvPrev: Float64Array;
   private errPrev = 1;
   private consecutiveRejections = 0;
   private readonly vPred: Float64Array;
@@ -161,7 +163,6 @@ class VariableStepImplicit extends BaseIntegrator {
     }
     this.hmax = hmax;
     this.vPrev = new Float64Array(sys.nU);
-    this.dvPrev = new Float64Array(sys.nS);
     this.vPred = new Float64Array(sys.nU);
     this.c = new Float64Array(sys.nS);
     this.err = new Float64Array(sys.nS);
@@ -333,7 +334,6 @@ class VariableStepImplicit extends BaseIntegrator {
       sys.stats.steps++;
       this.tPrev = t0;
       this.vPrev.set(v0);
-      this.dvPrev.set(dv0);
       this.stepsSinceRestart++;
       if (this.method === 'bdf' && this.order === 1 && this.stepsSinceRestart >= 2) this.order = 2;
 

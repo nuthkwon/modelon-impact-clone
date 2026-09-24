@@ -12,6 +12,7 @@ import {
   hasAttributeModifier,
   hasVisibleContent,
   intervalFromPoints,
+  modelicaLinkTarget,
   parseBooleanText,
   parseNumeric,
   pointsFromInterval,
@@ -176,6 +177,12 @@ describe('sanitizeHtml', () => {
   it('removes comments, frames and form elements but keeps structure', () => {
     const html = '<!-- c --><h4>Title</h4><iframe src="x"></iframe><form><input value="1"></form><table><tr><td>1</td></tr></table><br/>';
     expect(sanitizeHtml(html)).toBe('<h4>Title</h4><table><tr><td>1</td></tr></table><br />');
+  });
+  it('extracts class names from modelica:// links', () => {
+    expect(modelicaLinkTarget('modelica://Modelica.Blocks')).toBe('Modelica.Blocks');
+    expect(modelicaLinkTarget('modelica://Modelica.Blocks.Continuous#PID')).toBe('Modelica.Blocks.Continuous');
+    expect(modelicaLinkTarget('modelica://Modelica/Resources/Images/x.png')).toBeUndefined();
+    expect(modelicaLinkTarget('https://modelica.org')).toBeUndefined();
   });
   it('detects visible content', () => {
     expect(hasVisibleContent('<p>&nbsp;</p>')).toBe(false);

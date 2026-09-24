@@ -7,16 +7,10 @@ import type { MouseEvent } from 'react';
 import { parseDocumentation } from '@impact/core';
 import { Icon } from '../icons';
 import { useStore } from '../../store';
-import { hasVisibleContent, sanitizeHtml } from './helpers';
+import { hasVisibleContent, modelicaLinkTarget, sanitizeHtml } from './helpers';
 
 export interface InformationTabProps {
   className: string;
-}
-
-/** `modelica://Modelica.Blocks#anchor` → `Modelica.Blocks`; undefined for resource paths. */
-export function modelicaLinkTarget(href: string): string | undefined {
-  const m = /^modelica:\/\/([A-Za-z_][\w.]*)(?:#.*)?$/i.exec(href.trim());
-  return m ? m[1] : undefined;
 }
 
 export function InformationTab({ className }: InformationTabProps) {

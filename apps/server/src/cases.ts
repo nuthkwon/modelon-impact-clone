@@ -1,8 +1,9 @@
 /**
  * Expands an experiment definition into concrete cases.
  *
- * - One case from the base, plus one per extension (extension `modifiers.variables` and
- *   `analysis` are merged over the base).
+ * - Without extensions the base is the single case template; with extensions (Impact
+ *   semantics) each extension is a case template (extension `modifiers.variables` and
+ *   `analysis` are merged over the base) and the base itself is not a case.
  * - Modifier values of the form `range(a, b, n)` (n evenly spaced values, Impact's parameter
  *   sweep) or `choices(v1, v2, …)` expand into several cases; several such modifiers form a
  *   cartesian product. Expanded cases are labelled `R=100` (`R=100, C=0.001`).
@@ -117,9 +118,8 @@ function cartesian(sweeps: { name: string; values: ModifierValue[] }[]): [string
 
 export function expandCases(def: ExperimentDefinition): CaseSpec[] {
   const baseVars = def.base.modifiers?.variables ?? {};
-  const templates: { label?: string; variables: Record<string, ModifierValue>; analysis: ExperimentAnalysis }[] = [
-    { variables: { ...baseVars }, analysis: mergeAnalysis(def.base.analysis) },
-  ];
+  const templates: { label?: string; variables: Record<string, ModifierValue>; analysis: ExperimentAnalysis }[] = [];
+  if (!def.extensions?.length) templates.push({ variables: { ...baseVars }, analysis: mergeAnalysis(def.base.analysis) });
   for (const ext of def.extensions ?? []) {
     templates.push({
       label: ext.caseData?.label,

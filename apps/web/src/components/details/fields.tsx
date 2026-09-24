@@ -1,7 +1,7 @@
 /**
  * Small labelled inputs shared by the ANALYSIS panel and the Execution settings dialog.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { formatNumber } from '@impact/core';
 import { parseNumeric } from './helpers';
@@ -25,6 +25,7 @@ export function NumberInput({ value, onCommit, accept, invalid, disabled, classN
   const text = formatNumber(value, digits);
   const [draft, setDraft] = useState(text);
   const [focused, setFocused] = useState(false);
+  const suppressBlurRef = useRef(false);
   useEffect(() => {
     if (!focused) setDraft(text);
   }, [text, focused]);
@@ -51,6 +52,10 @@ export function NumberInput({ value, onCommit, accept, invalid, disabled, classN
       onFocus={() => setFocused(true)}
       onBlur={() => {
         setFocused(false);
+        if (suppressBlurRef.current) {
+          suppressBlurRef.current = false;
+          return;
+        }
         commit();
       }}
       onKeyDown={(e) => {
@@ -58,10 +63,12 @@ export function NumberInput({ value, onCommit, accept, invalid, disabled, classN
         if (e.key === 'Enter') {
           e.preventDefault();
           commit();
+          suppressBlurRef.current = true;
           (e.target as HTMLInputElement).blur();
         } else if (e.key === 'Escape') {
           e.preventDefault();
           setDraft(text);
+          suppressBlurRef.current = true;
           (e.target as HTMLInputElement).blur();
         }
       }}
@@ -102,5 +109,5 @@ export interface SwitchProps {
 
 /** Tiny toggle switch (Interval ⇄ Points). */
 export function Switch({ on, onToggle, ariaLabel, disabled }: SwitchProps) {
-  return <button type="button" role="switch" aria-checked={on} aria-label={ariaLabel} className={`switch${on ? ' on' : ''}`} onClick={onToggle} disabled={disabled} />;
+  return <button type="button" role="switch" aria-checked={on} aria-label={ariaLabel} className={`details-switch${on ? ' on' : ''}`} onClick={onToggle} disabled={disabled} />;
 }

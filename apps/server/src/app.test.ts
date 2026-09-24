@@ -406,7 +406,7 @@ describe('experiments (fake engine)', () => {
 
   it('creates an experiment and expands range() modifiers into cases', async () => {
     const r = await api<ExperimentDto & { experiment_id: string }>(t.base, 'POST', `/api/workspaces/${wid}/experiments`, {
-      ...definition({ R: 'range(100, 300, 3)' }, [{ modifiers: { variables: { R: 50 } }, caseData: { label: 'Fixed' } }]),
+      ...definition({ R: 1 }, [{ modifiers: { variables: { R: 'range(100, 300, 3)' } } }, { modifiers: { variables: { R: 50 } }, caseData: { label: 'Fixed' } }]),
       label: 'Sweep',
     });
     expect(r.status).toBe(201);

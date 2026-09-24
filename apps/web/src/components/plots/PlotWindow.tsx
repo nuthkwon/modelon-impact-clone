@@ -16,38 +16,16 @@ import { unitOf, useCaseMeta } from '../results/resultMeta';
 import { PlotChart } from './PlotChart';
 import type { ChartSeries } from './PlotChart';
 import { usePlotSeries } from './usePlotSeries';
+import { hasVariableDrag, readVariableDrag } from './dragTypes';
 import './plots.css';
 
-export const VARIABLE_DRAG_TYPE = 'application/x-impact-variable';
+export { VARIABLE_DRAG_TYPE, hasVariableDrag, readVariableDrag, setVariableDrag } from './dragTypes';
+export type { VariableDragPayload } from './dragTypes';
+
 export const PLOT_MIN_WIDTH = 240;
 export const PLOT_MIN_HEIGHT = 160;
 const TOOLBAR_HEIGHT = 28;
 const X_ZONE_HEIGHT = 24;
-
-export interface VariableDragPayload {
-  resultId?: string;
-  variable: string;
-}
-
-/** True when a drag carries a variable (`application/x-impact-variable`). */
-export function hasVariableDrag(dt: DataTransfer | null): boolean {
-  if (!dt) return false;
-  return Array.from(dt.types ?? []).includes(VARIABLE_DRAG_TYPE);
-}
-
-/** Parses the variable drag payload (only readable on `drop`). */
-export function readVariableDrag(dt: DataTransfer | null): VariableDragPayload | undefined {
-  if (!dt) return undefined;
-  try {
-    const raw = dt.getData(VARIABLE_DRAG_TYPE);
-    if (!raw) return undefined;
-    const p = JSON.parse(raw) as Partial<VariableDragPayload>;
-    if (typeof p.variable !== 'string' || !p.variable) return undefined;
-    return { variable: p.variable, resultId: typeof p.resultId === 'string' ? p.resultId : undefined };
-  } catch {
-    return undefined;
-  }
-}
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), Math.max(lo, hi));
 

@@ -3,8 +3,37 @@
  * Option names follow Modelon Impact's `dynamic` custom function.
  */
 
-/** Solver names offered in the UI. They map onto the integrators implemented in `solver/`. */
-export type SolverName = 'CVode' | 'Radau5' | 'Explicit Euler' | 'Runge-Kutta' | 'Implicit Euler';
+/**
+ * Solver names. The UI offers Impact's names (`CVode`, `Radau5ODE`, `ExplicitEuler`); the
+ * remaining spellings are accepted aliases and map onto the integrators implemented in `solver/`.
+ */
+export type SolverName =
+  | 'CVode'
+  | 'Radau5'
+  | 'Radau5ODE'
+  | 'Explicit Euler'
+  | 'ExplicitEuler'
+  | 'Runge-Kutta'
+  | 'RungeKutta'
+  | 'Implicit Euler'
+  | 'ImplicitEuler';
+
+/** Canonical solver name for a user-facing spelling (case-insensitive, spaces/dashes ignored). Unknown → undefined. */
+export function normalizeSolverName(name: string | undefined): SolverName | undefined {
+  if (!name) return undefined;
+  const key = name.replace(/[\s_-]/g, '').toLowerCase();
+  switch (key) {
+    case 'cvode': return 'CVode';
+    case 'radau5': case 'radau5ode': case 'radau': return 'Radau5';
+    case 'expliciteuler': case 'euler': return 'Explicit Euler';
+    case 'rungekutta': case 'rk4': return 'Runge-Kutta';
+    case 'impliciteuler': case 'bdf1': return 'Implicit Euler';
+    default: return undefined;
+  }
+}
+
+/** Solver names shown in the Analysis tab, in Impact's spelling. */
+export const UI_SOLVER_NAMES = ['CVode', 'Radau5ODE', 'ExplicitEuler'] as const;
 
 export interface SimulationOptions {
   /** `start_time` */

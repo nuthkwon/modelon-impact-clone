@@ -57,6 +57,8 @@ export function ParameterRow(props: ParameterRowProps) {
   }, [current, focused]);
 
   const inputRef = useRef<HTMLInputElement>(null);
+  /** Set before a programmatic blur (Enter/Escape) so the blur handler does not commit again / commit a cancelled draft. */
+  const suppressBlurRef = useRef(false);
   const attrButtonRef = useRef<HTMLButtonElement>(null);
   const [attrsOpen, setAttrsOpen] = useState(false);
 
@@ -67,15 +69,26 @@ export function ParameterRow(props: ParameterRowProps) {
     onCommit(next);
   };
 
+  const onBlur = () => {
+    setFocused(false);
+    if (suppressBlurRef.current) {
+      suppressBlurRef.current = false;
+      return;
+    }
+    commitText();
+  };
+
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     e.stopPropagation();
     if (e.key === 'Enter') {
       e.preventDefault();
       commitText();
+      suppressBlurRef.current = true;
       inputRef.current?.blur();
     } else if (e.key === 'Escape') {
       e.preventDefault();
       setDraft(current ?? '');
+      suppressBlurRef.current = true;
       inputRef.current?.blur();
     }
   };
@@ -121,10 +134,7 @@ export function ParameterRow(props: ParameterRowProps) {
         disabled={disabled && !results}
         onChange={(e) => setDraft(e.target.value)}
         onFocus={() => setFocused(true)}
-        onBlur={() => {
-          setFocused(false);
-          commitText();
-        }}
+        onBlur={onBlur}
         onKeyDown={onKeyDown}
         spellCheck={false}
         aria-label={fullName}
@@ -140,7 +150,10 @@ export function ParameterRow(props: ParameterRowProps) {
       <Tooltip text={description}>
         <div className="param-name">
           {favorite && <span className="param-fav-dot" aria-label="favorite" />}
-          <span>{p.name}</span>
+          <span>
+            {p.name.includes('.') && <span className="param-name-prefix">{p.name.slice(0, p.name.lastIndexOf('.') + 1)}</span>}
+            {p.name.slice(p.name.lastIndexOf('.') + 1)}
+          </span>
         </div>
       </Tooltip>
       <button
@@ -225,6 +238,7 @@ function AttributesEditor({ fullName, values, disabled, onCommit, onClose }: Att
 function AttrField({ attr, label, value, disabled, onCommit }: { attr: AttributeName; label: string; value: string | undefined; disabled: boolean; onCommit: (v: string | null) => void }) {
   const [draft, setDraft] = useState(value ?? '');
   const [focused, setFocused] = useState(false);
+  const suppressBlurRef = useRef(false);
   useEffect(() => {
     if (!focused) setDraft(value ?? '');
   }, [value, focused]);
@@ -259,6 +273,10 @@ function AttrField({ attr, label, value, disabled, onCommit }: { attr: Attribute
         onFocus={() => setFocused(true)}
         onBlur={() => {
           setFocused(false);
+          if (suppressBlurRef.current) {
+            suppressBlurRef.current = false;
+            return;
+          }
           commit();
         }}
         onKeyDown={(e) => {
@@ -266,9 +284,13 @@ function AttrField({ attr, label, value, disabled, onCommit }: { attr: Attribute
           if (e.key === 'Enter') {
             e.preventDefault();
             commit();
+            suppressBlurRef.current = true;
             (e.target as HTMLInputElement).blur();
           } else if (e.key === 'Escape') {
+            e.preventDefault();
             setDraft(value ?? '');
+            suppressBlurRef.current = true;
+            (e.target as HTMLInputElement).blur();
           }
         }}
         spellCheck={false}

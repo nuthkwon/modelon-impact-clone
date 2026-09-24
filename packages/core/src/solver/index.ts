@@ -29,9 +29,6 @@ export interface SimulationHooks {
 
 export { compileModel } from './compile.js';
 export type { CompiledModel } from './compile.js';
-export { luFactor, luSolve, solveLinear } from './linalg.js';
-export { newtonSolve, JacobianCache } from './newton.js';
-export type { NewtonProblem, NewtonResult } from './newton.js';
 
 function now(): number {
   return typeof performance !== 'undefined' ? performance.now() : Date.now();
@@ -183,10 +180,7 @@ export function simulate(flat: FlatModel, options: SimulationOptions, hooks?: Si
     };
   } catch (e) {
     finish();
-    if (e instanceof ModelicaError) {
-      logFn('error', e.message);
-      hooks?.onLog?.('error', e.message);
-    }
+    if (e instanceof ModelicaError) logFn('error', e.message);
     throw e;
   }
 }

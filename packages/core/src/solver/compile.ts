@@ -355,7 +355,6 @@ export function compileModel(flat: FlatModel, options: SimulationOptions): Compi
   // ---- expression compiler ----------------------------------------------------------------
   const relations: CompiledRelation[] = [];
   const samplers: Sampler[] = [];
-  const unaryCache = new Map<string, (x: number) => number>();
 
   interface Mode {
     noEvent: boolean;
@@ -589,7 +588,6 @@ export function compileModel(flat: FlatModel, options: SimulationOptions): Compi
     const un = getUnaryBuiltin(callee);
     if (un) {
       if (e.args.length !== 1) return fail(mode, `'${callee}' expects 1 argument: ${formatExpr(e)}`);
-      unaryCache.set(callee, un);
       const a = compile(e.args[0], mode);
       return (ctx) => un(a(ctx));
     }

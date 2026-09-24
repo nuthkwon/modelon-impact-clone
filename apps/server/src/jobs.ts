@@ -8,6 +8,7 @@
  */
 import { performance } from 'node:perf_hooks';
 import type { Diagnostic, FlatModel, SimulationOptions, SimulationResult, SolverName } from '@impact/core';
+import { normalizeSolverName } from '@impact/core';
 import type { CaseDto, CaseStatus, ExecutionStatus, ExecutionStatusResponse, ExperimentAnalysis, ExperimentDto } from '@impact/protocol';
 import type { Engine } from './engine.js';
 import { conflict, diagnosticsOf } from './errors.js';
@@ -26,7 +27,6 @@ interface ExecutionJob {
   cancelled: boolean;
 }
 
-const SOLVERS: readonly SolverName[] = ['CVode', 'Radau5', 'Explicit Euler', 'Runge-Kutta', 'Implicit Euler'];
 
 export function formatDiagnostic(d: Diagnostic): string {
   let s = d.message;
@@ -51,7 +51,7 @@ export function buildSimulationOptions(analysis: ExperimentAnalysis, flat: FlatM
   const sol = analysis.solverOptions ?? {};
   const startTime = num(p.start_time) ?? flat?.experiment?.StartTime ?? 0;
   const finalTime = num(p.final_time) ?? flat?.experiment?.StopTime ?? 1;
-  const solverName = typeof sol.solver === 'string' && SOLVERS.includes(sol.solver as SolverName) ? (sol.solver as SolverName) : 'CVode';
+  const solverName: SolverName = (typeof sol.solver === 'string' ? normalizeSolverName(sol.solver) : undefined) ?? 'CVode';
   const atol = num(sol.atol);
   const stepSize = num(sol.step_size);
   return {

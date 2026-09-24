@@ -1,0 +1,203 @@
+/* Plot windows & SVG chart — docs/UI_SPEC.md §5.5. Plots keep a white surface in dark mode
+   unless html[data-dark-canvas="true"] (settings: "Exclude canvas/plots from dark mode" off). */
+
+.plot-window {
+  --plot-bg: #ffffff;
+  --plot-fg: rgba(0, 0, 0, 0.87);
+  --plot-fg-muted: rgba(0, 0, 0, 0.6);
+  --plot-border: #e0e0e0;
+  --plot-toolbar-bg: #f7f7f7;
+  --plot-hover-bg: rgba(0, 0, 0, 0.06);
+  --plot-grid: #e5e5e5;
+  --plot-axis: #444444;
+  --plot-cursor: var(--orange);
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  min-width: 240px;
+  min-height: 160px;
+  background: var(--plot-bg);
+  color: var(--plot-fg);
+  border: 1px solid var(--plot-border);
+  border-radius: 4px;
+  box-shadow: var(--shadow-2);
+  overflow: hidden;
+  user-select: none;
+  font-size: 12px;
+  z-index: 1;
+}
+.plot-window.pinned { z-index: 2; }
+.plot-window.live { box-shadow: var(--shadow-3); }
+.plot-window.drag-over { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+html[data-theme="dark"][data-dark-canvas="true"] .plot-window {
+  --plot-bg: #1e1e1e;
+  --plot-fg: rgba(255, 255, 255, 0.87);
+  --plot-fg-muted: rgba(255, 255, 255, 0.6);
+  --plot-border: #3c3c3c;
+  --plot-toolbar-bg: #262626;
+  --plot-hover-bg: rgba(255, 255, 255, 0.08);
+  --plot-grid: #3c3c3c;
+  --plot-axis: #cccccc;
+}
+
+/* toolbar --------------------------------------------------------------- */
+.plot-toolbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 4px 0 2px;
+  background: var(--plot-toolbar-bg);
+  border-bottom: 1px solid var(--plot-border);
+  cursor: grab;
+}
+.plot-window.live .plot-toolbar { cursor: grabbing; }
+.plot-drag-handle {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 24px; color: var(--plot-fg-muted);
+}
+.plot-drag-handle svg { width: 16px; height: 16px; }
+.plot-title {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 12px; font-weight: 500; line-height: 28px;
+}
+.plot-title-input {
+  flex: 1; min-width: 0; height: 22px; padding: 0 6px; font-size: 12px;
+  border: 1px solid var(--accent); border-radius: 3px; outline: none;
+  background: var(--plot-bg); color: var(--plot-fg);
+}
+.plot-toolbar-status { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
+.plot-error-badge { display: inline-flex; color: var(--error); }
+.plot-error-badge svg { width: 16px; height: 16px; }
+.plot-toolbar-buttons { display: flex; align-items: center; margin-left: auto; cursor: default; }
+.plot-tool {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; border-radius: 4px; color: var(--plot-fg-muted);
+}
+.plot-tool svg { width: 16px; height: 16px; }
+.plot-tool:hover { background: var(--plot-hover-bg); color: var(--plot-fg); }
+.plot-tool.active { color: var(--accent); }
+.plot-pin.pinned { color: var(--orange); }
+.plot-pin.pinned svg { transform: rotate(-45deg); }
+
+.plot-spinner {
+  display: inline-block; width: 12px; height: 12px; border-radius: 50%;
+  border: 2px solid var(--plot-grid); border-top-color: var(--accent);
+  animation: plot-spin 0.8s linear infinite;
+}
+@keyframes plot-spin { to { transform: rotate(360deg); } }
+
+/* body / chart ---------------------------------------------------------- */
+.plot-body { flex: 1; min-height: 0; position: relative; }
+
+.plot-chart { position: relative; width: 100%; height: 100%; overflow: hidden; font-family: var(--font); }
+.plot-chart-svg { display: block; cursor: crosshair; touch-action: none; }
+.plot-chart-svg.panning { cursor: grabbing; }
+.plot-chart-bg { fill: var(--plot-bg); }
+.plot-grid line { stroke: var(--plot-grid); stroke-width: 1; }
+.plot-grid line.minor { stroke-opacity: 0.55; }
+.plot-zeroline { stroke: var(--plot-axis); stroke-opacity: 0.35; stroke-width: 1; }
+.plot-axis-lines line { stroke: var(--plot-grid); stroke-width: 1; }
+.plot-ticks text { fill: var(--plot-axis); font-size: 11px; font-family: var(--font); font-variant-numeric: tabular-nums; }
+.plot-ticks text.minor { fill-opacity: 0.6; }
+.plot-axis-title { fill: var(--plot-axis); font-size: 11px; font-family: var(--font); }
+.plot-series { fill: none; stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
+.plot-cursor { stroke: var(--plot-cursor); stroke-width: 1; stroke-dasharray: 4 3; pointer-events: none; }
+.plot-hover line { stroke: var(--plot-axis); stroke-opacity: 0.6; stroke-width: 1; pointer-events: none; }
+.plot-hover circle { stroke: var(--plot-bg); stroke-width: 1.5; pointer-events: none; }
+.plot-zoom-rect { fill: rgba(25, 118, 210, 0.1); stroke: var(--accent); stroke-width: 1; stroke-dasharray: 3 2; pointer-events: none; }
+.plot-empty { fill: var(--plot-fg-muted); font-family: var(--font); }
+
+.plot-tooltip {
+  position: absolute; z-index: 3; pointer-events: none; max-width: 320px; white-space: nowrap;
+  padding: 4px 8px; font-size: 11px; line-height: 16px;
+  background: var(--plot-bg); color: var(--plot-fg);
+  border: 1px solid var(--plot-border); border-radius: 4px; box-shadow: var(--shadow-2);
+}
+.plot-tooltip-x { color: var(--plot-fg-muted); margin-bottom: 2px; font-variant-numeric: tabular-nums; }
+.plot-tooltip-row { display: flex; align-items: center; gap: 6px; }
+.plot-tooltip-key { flex: none; width: 12px; height: 2px; border-radius: 1px; }
+.plot-tooltip-value { font-weight: 500; font-variant-numeric: tabular-nums; }
+.plot-tooltip-label { color: var(--plot-fg-muted); overflow: hidden; text-overflow: ellipsis; }
+
+.plot-reset-zoom {
+  position: absolute; top: 4px; right: 6px; height: 20px; padding: 0 8px;
+  font-size: 11px; border-radius: 3px; color: var(--accent);
+  background: var(--plot-bg); border: 1px solid var(--plot-border); box-shadow: var(--shadow-1);
+}
+.plot-reset-zoom:hover { background: var(--plot-hover-bg); }
+
+/* drop zones ------------------------------------------------------------ */
+.plot-dropzone {
+  position: absolute; left: 0; right: 0; pointer-events: none;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 500; letter-spacing: 0.04em; text-transform: uppercase; color: var(--accent);
+  background: rgba(25, 118, 210, 0.08); border: 1px dashed rgba(25, 118, 210, 0.5);
+}
+.plot-dropzone.y { top: 0; bottom: 24px; }
+.plot-dropzone.x { bottom: 0; }
+.plot-dropzone.active { background: rgba(25, 118, 210, 0.18); border-style: solid; }
+.plot-dropzone span { padding: 2px 8px; border-radius: 3px; background: var(--plot-bg); }
+
+/* legend ---------------------------------------------------------------- */
+.plot-legend {
+  flex: none; display: flex; flex-wrap: wrap; gap: 2px 10px; max-height: 40%; overflow: auto;
+  padding: 2px 8px 4px; border-top: 1px solid var(--plot-border); font-size: 11px;
+}
+.plot-legend-item {
+  display: inline-flex; align-items: center; gap: 5px; height: 20px; max-width: 100%;
+  padding: 0 2px; border-radius: 3px; cursor: pointer;
+}
+.plot-legend-item:hover { background: var(--plot-hover-bg); }
+.plot-legend-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.plot-legend-item.hidden .plot-legend-label { color: var(--plot-fg-muted); text-decoration: line-through; opacity: 0.7; }
+.plot-legend-item.hidden .plot-legend-dot { opacity: 0.35; }
+.plot-legend-item.missing .plot-legend-label,
+.plot-legend-item.error .plot-legend-label { color: var(--error); }
+.plot-legend-dot { flex: none; width: 10px; height: 10px; padding: 0; border-radius: 50%; border: 1px solid rgba(0, 0, 0, 0.15); }
+.plot-legend-dot:hover { transform: scale(1.2); }
+.plot-legend-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--plot-fg); }
+.plot-legend-status { color: var(--plot-fg-muted); }
+.plot-legend-remove {
+  display: none; align-items: center; justify-content: center;
+  width: 16px; height: 16px; border-radius: 50%; color: var(--plot-fg-muted);
+}
+.plot-legend-remove svg { width: 12px; height: 12px; }
+.plot-legend-remove:hover { background: var(--plot-hover-bg); color: var(--plot-fg); }
+.plot-legend-item:hover .plot-legend-remove,
+.plot-legend-item:focus-within .plot-legend-remove { display: inline-flex; }
+
+/* settings popover ------------------------------------------------------ */
+.plot-settings {
+  position: absolute; top: 30px; right: 4px; z-index: 5; width: 220px;
+  display: flex; flex-direction: column; gap: 8px; padding: 8px 10px;
+  background: var(--surface); color: var(--text-primary); font-size: 12px; cursor: default;
+  border: 1px solid var(--border); border-radius: 4px; box-shadow: var(--shadow-3);
+}
+.plot-settings-field { display: flex; flex-direction: column; gap: 3px; }
+.plot-settings-field > span { font-size: 11px; color: var(--text-secondary); }
+.plot-settings .text-field { height: 26px; font-size: 12px; }
+.plot-settings-check { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.plot-settings-check input { margin: 0; accent-color: var(--accent); }
+
+/* colour menu ----------------------------------------------------------- */
+.plot-color-menu {
+  position: absolute; z-index: 6; display: grid; grid-template-columns: repeat(5, 18px); gap: 6px; padding: 8px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 4px; box-shadow: var(--shadow-3);
+}
+.plot-swatch { width: 18px; height: 18px; padding: 0; border-radius: 50%; border: 2px solid transparent; }
+.plot-swatch:hover { transform: scale(1.12); }
+.plot-swatch.selected { border-color: var(--text-primary); }
+
+/* resize handle --------------------------------------------------------- */
+.plot-resize {
+  position: absolute; right: 0; bottom: 0; width: 14px; height: 14px; cursor: nwse-resize;
+  background: linear-gradient(
+    135deg,
+    transparent 50%, var(--border-strong) 50%, var(--border-strong) 58%,
+    transparent 58%, transparent 74%, var(--border-strong) 74%, var(--border-strong) 82%,
+    transparent 82%
+  );
+}

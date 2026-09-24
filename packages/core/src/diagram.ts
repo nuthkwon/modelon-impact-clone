@@ -34,6 +34,12 @@ export interface ParameterInfo {
   structural?: boolean;
   min?: number;
   max?: number;
+  /**
+   * Attribute modifiers set on the parameter (declaration + owner component), as Modelica text,
+   * e.g. `{ start: '1', fixed: 'true' }`. Dotted modifiers such as `R.start` are not parameters
+   * of their own; they surface here on `R`.
+   */
+  attributes?: Record<string, string>;
   loc?: SourceLoc;
 }
 
@@ -63,6 +69,8 @@ export interface PortView {
   /** Domain hint for coloring/snapping, derived from the connector class name. */
   domain: string;
   description?: string;
+  /** false when the connector declaration has no `Placement` annotation (a hidden default placement is used). */
+  hasPlacement?: boolean;
 }
 
 export interface ComponentView {
@@ -83,6 +91,12 @@ export interface ComponentView {
   isConnector: boolean;
   /** Conditional component whose condition is false. */
   disabled?: boolean;
+  /** Declared in a `protected` section. */
+  protected?: boolean;
+  /** Declared in a base class of the class being viewed (cannot be moved or deleted there). */
+  inherited?: boolean;
+  /** false when the declaration has no `Placement` annotation: `placement` is then a hidden default and the canvas does not draw the component. */
+  hasPlacement?: boolean;
   loc?: SourceLoc;
 }
 
@@ -91,8 +105,10 @@ export interface ConnectionView {
   from: string;
   to: string;
   line: ConnectionLine;
-  /** Index of the connect equation in the class's equation list, for editing. */
+  /** Index of the connect equation in the class's equation list, for editing. `-1` for inherited connections. */
   equationIndex: number;
+  /** True when the connect equation comes from a base class (not editable in this class). */
+  inherited?: boolean;
   loc?: SourceLoc;
 }
 

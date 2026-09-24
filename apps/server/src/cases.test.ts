@@ -49,20 +49,19 @@ describe('expandCases', () => {
     expect(cases[3].parametrization).toEqual({ R: 200, b: false, fixed: 7 });
   });
 
-  it('adds one case per extension, merging modifiers and analysis over the base', () => {
+  it('uses one case per extension (Impact semantics: the base is not a case), merging modifiers and analysis over the base', () => {
     const cases = expandCases(
       definition({ R: 100, C: 1 }, [
         { modifiers: { variables: { R: 50 } }, caseData: { label: 'Low R' }, analysis: { parameters: { final_time: 10 }, solverOptions: { rtol: 1e-8 } } },
         { modifiers: { variables: { C: 'range(1, 2, 2)' } } },
       ]),
     );
-    expect(cases).toHaveLength(4);
-    expect(cases[0]).toMatchObject({ label: 'Case 1', parametrization: { R: 100, C: 1 } });
-    expect(cases[1]).toMatchObject({ label: 'Low R', parametrization: { R: 50, C: 1 } });
-    expect(cases[1].analysis.parameters).toEqual({ start_time: 0, final_time: 10 });
-    expect(cases[1].analysis.solverOptions).toEqual({ solver: 'CVode', rtol: 1e-8 });
-    expect(cases[2]).toMatchObject({ label: 'C=1', parametrization: { R: 100, C: 1 } });
-    expect(cases[3]).toMatchObject({ label: 'C=2', parametrization: { R: 100, C: 2 } });
+    expect(cases).toHaveLength(3);
+    expect(cases[0]).toMatchObject({ label: 'Low R', parametrization: { R: 50, C: 1 } });
+    expect(cases[0].analysis.parameters).toEqual({ start_time: 0, final_time: 10 });
+    expect(cases[0].analysis.solverOptions).toEqual({ solver: 'CVode', rtol: 1e-8 });
+    expect(cases[1]).toMatchObject({ label: 'C=1', parametrization: { R: 100, C: 1 } });
+    expect(cases[2]).toMatchObject({ label: 'C=2', parametrization: { R: 100, C: 2 } });
   });
 });
 

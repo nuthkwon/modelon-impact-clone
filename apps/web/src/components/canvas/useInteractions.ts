@@ -10,7 +10,7 @@
  *  - port to port     → `addConnection`
  *  - segment/corner   → `setConnectionPoints`
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent, MouseEvent as ReactMouseEvent, RefObject } from 'react';
 import type { DiagramView, Point } from '@impact/core';
 import { useStore } from '../../store';
@@ -18,6 +18,7 @@ import type { Viewport } from '../../store/types';
 import { useContextMenu } from '../common/ContextMenu';
 import { useShellActions } from '../shell/shellActions';
 import type { MenuItem } from '../common/ContextMenu';
+import { Icon } from '../icons';
 import { clipboardSize, copyComponents, pasteComponents } from './clipboard';
 import {
   angleBetween,
@@ -422,17 +423,17 @@ export function useInteractions({ svgRef, diagram, viewport, readOnly, anchors, 
         if (!store.selection.includes(comp.name)) store.select([comp.name]);
         const name = comp.name;
         const items: MenuItem[] = [
-          { label: 'Rotate 90° clockwise', disabled: readOnly, onSelect: () => void store.applyEdit({ op: 'rotateComponent', name, deltaDegrees: -90 }) },
-          { label: 'Rotate 90° counter-clockwise', disabled: readOnly, onSelect: () => void store.applyEdit({ op: 'rotateComponent', name, deltaDegrees: 90 }) },
-          { label: 'Flip horizontal', disabled: readOnly, onSelect: () => void store.applyEdit({ op: 'flipComponent', name, axis: 'horizontal' }) },
-          { label: 'Flip vertical', disabled: readOnly, onSelect: () => void store.applyEdit({ op: 'flipComponent', name, axis: 'vertical' }) },
-          { label: '', separator: true },
-          { label: 'Rename…', disabled: readOnly, onSelect: () => shell.openRename({ kind: 'component', name }) },
-          { label: 'Show documentation', onSelect: () => shell.showDocumentation(comp.className) },
-          { label: 'Open class', onSelect: () => store.openClass(comp.className) },
-          { label: '', separator: true },
-          { label: 'Copy', shortcut: 'Ctrl+C', onSelect: () => copyComponents(store.diagram, store.selection.includes(name) ? store.selection : [name]) },
-          { label: 'Delete', shortcut: 'Del', danger: true, disabled: readOnly, onSelect: () => deleteSelection() },
+          { label: 'Rotate 90° clockwise', icon: createElement(Icon.Rotate), disabled: readOnly, onSelect: () => void store.applyEdit({ op: 'rotateComponent', name, deltaDegrees: -90 }) },
+          { label: 'Rotate 90° counter-clockwise', icon: createElement(Icon.RotateLeft), disabled: readOnly, onSelect: () => void store.applyEdit({ op: 'rotateComponent', name, deltaDegrees: 90 }) },
+          { label: 'Flip horizontal', icon: createElement(Icon.Flip), disabled: readOnly, onSelect: () => void store.applyEdit({ op: 'flipComponent', name, axis: 'horizontal' }) },
+          { label: 'Flip vertical', icon: createElement(Icon.Flip, { style: { transform: 'rotate(90deg)' } }), disabled: readOnly, onSelect: () => void store.applyEdit({ op: 'flipComponent', name, axis: 'vertical' }) },
+          { separator: true },
+          { label: 'Rename…', icon: createElement(Icon.Edit), disabled: readOnly, onSelect: () => shell.openRename({ kind: 'component', name }) },
+          { label: 'Show documentation', icon: createElement(Icon.Description), onSelect: () => shell.showDocumentation(comp.className) },
+          { label: 'Open class', icon: createElement(Icon.OpenInNew), onSelect: () => store.openClass(comp.className) },
+          { separator: true },
+          { label: 'Copy', icon: createElement(Icon.ContentCopy), shortcut: 'Ctrl+C', onSelect: () => copyComponents(store.diagram, store.selection.includes(name) ? store.selection : [name]) },
+          { label: 'Delete', icon: createElement(Icon.Delete), shortcut: 'Del', danger: true, disabled: readOnly, onSelect: () => deleteSelection() },
         ];
         ctx.open(e, items);
         return;
@@ -441,14 +442,14 @@ export function useInteractions({ svgRef, diagram, viewport, readOnly, anchors, 
       if (connAttr !== undefined) {
         const idx = Number(connAttr);
         store.select([], idx);
-        ctx.open(e, [{ label: 'Delete connection', danger: true, disabled: readOnly, onSelect: () => void store.applyEdit({ op: 'deleteConnection', equationIndex: idx }) }]);
+        ctx.open(e, [{ label: 'Delete connection', icon: createElement(Icon.Delete), danger: true, disabled: readOnly, onSelect: () => void store.applyEdit({ op: 'deleteConnection', equationIndex: idx }) }]);
         return;
       }
       const showGrid = store.settings.showGrid;
       ctx.open(e, [
         { label: 'Paste', shortcut: 'Ctrl+V', disabled: readOnly || clipboardSize() === 0, onSelect: () => void paste() },
-        { label: 'Fit to view', shortcut: 'F', onSelect: () => viewport.fit() },
-        { label: showGrid ? 'Hide grid' : 'Show grid', onSelect: () => store.updateSettings({ showGrid: !showGrid }) },
+        { label: 'Fit to view', icon: createElement(Icon.FitScreen), shortcut: 'F', onSelect: () => viewport.fit() },
+        { label: 'Show grid', icon: createElement(Icon.Grid), checked: showGrid, onSelect: () => store.updateSettings({ showGrid: !showGrid }) },
       ]);
     },
     [componentsByName, readOnly, ctx, shell, deleteSelection, paste, viewport],

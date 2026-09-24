@@ -256,6 +256,12 @@ export function sanitizeHtml(html: string): string {
   return s.trim();
 }
 
+/** `modelica://Modelica.Blocks#anchor` → `Modelica.Blocks`; undefined for resource paths (`modelica://Lib/Resources/x.png`) and other schemes. */
+export function modelicaLinkTarget(href: string): string | undefined {
+  const m = /^modelica:\/\/([A-Za-z_][\w.]*)(?:#.*)?$/i.exec(href.trim());
+  return m ? m[1] : undefined;
+}
+
 /** True when the sanitised HTML has any visible text or content. */
 export function hasVisibleContent(html: string): boolean {
   return html.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim().length > 0;

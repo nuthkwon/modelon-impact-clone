@@ -1,10 +1,12 @@
 /**
  * Root component: hash-free path routing between the Home page (`/`) and a workspace
- * (`/workspaces/:wid`). Implemented by the app-shell module; this file only wires routing.
+ * (`/workspaces/:wid`), plus the global hosts of the app shell (context menu, shell dialogs).
  */
 import { useEffect, useState } from 'react';
 import { HomePage } from './pages/HomePage';
 import { WorkspacePage } from './pages/WorkspacePage';
+import { ContextMenuHost } from './components/common/ContextMenu';
+import { ShellDialogs } from './components/shell/ShellDialogs';
 
 export function usePath(): [string, (path: string) => void] {
   const [path, setPath] = useState(window.location.pathname);
@@ -14,9 +16,10 @@ export function usePath(): [string, (path: string) => void] {
     return () => window.removeEventListener('popstate', onPop);
   }, []);
   const navigate = (p: string) => {
-    if (p === window.location.pathname) return;
+    const [pathname] = p.split('?');
+    if (p === `${window.location.pathname}${window.location.search}`) return;
     window.history.pushState(null, '', p);
-    setPath(p);
+    setPath(pathname);
   };
   return [path, navigate];
 }
@@ -24,6 +27,11 @@ export function usePath(): [string, (path: string) => void] {
 export function App() {
   const [path, navigate] = usePath();
   const m = /^\/workspaces\/([^/]+)/.exec(path);
-  if (m) return <WorkspacePage workspaceId={decodeURIComponent(m[1])} navigate={navigate} />;
-  return <HomePage navigate={navigate} />;
+  return (
+    <>
+      {m ? <WorkspacePage key={m[1]} workspaceId={decodeURIComponent(m[1])} navigate={navigate} /> : <HomePage navigate={navigate} />}
+      <ShellDialogs />
+      <ContextMenuHost />
+    </>
+  );
 }
