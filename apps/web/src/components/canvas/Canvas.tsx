@@ -18,7 +18,9 @@ import { Stickies } from './Stickies';
 import { TimeSlider } from './TimeSlider';
 import { ViewsFab } from './ViewsFab';
 import { screenToDiagram, SNAP_GRID } from './geometry';
-import type { InteractionApi } from './useInteractions';
+import type { CanvasTool, InteractionApi } from './useInteractions';
+import { Tooltip } from '../common/Tooltip';
+import { Icon } from '../icons';
 import { useViewport } from './useViewport';
 import './canvas.css';
 
@@ -63,6 +65,8 @@ export function Canvas(): JSX.Element {
   viewportRef.current = viewport;
   const interactionsRef = useRef<InteractionApi | null>(null);
   const [dropActive, setDropActive] = useState(false);
+  // Select (Impact's default) or Pan (hand) tool; kept for the session.
+  const [tool, setTool] = useState<CanvasTool>('select');
   const [logHeight, setLogHeight] = useState(LOG_DEFAULT_HEIGHT);
 
   // Keyboard shortcuts (§10). Undo/redo, modes and save are handled by the shell.
@@ -74,7 +78,16 @@ export function Canvas(): JSX.Element {
       const ctrl = e.ctrlKey || e.metaKey;
       const key = e.key;
       if (key === 'Escape') {
-        api?.cancel();
+        if (api?.state.kind === 'idle' && tool === 'pan') setTool('select');
+        else api?.cancel();
+        return;
+      }
+      if (!ctrl && !e.altKey && !e.shiftKey && (key === 'h' || key === 'H')) {
+        setTool('pan');
+        return;
+      }
+      if (!ctrl && !e.altKey && !e.shiftKey && (key === 'v' || key === 'V')) {
+        setTool('select');
         return;
       }
       if ((key === 'Delete' || key === 'Backspace') && !ctrl) {
@@ -117,7 +130,7 @@ export function Canvas(): JSX.Element {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [view, readOnly]);
+  }, [view, readOnly, tool]);
 
   // ---------------------------------------------------------------- drag & drop
   const acceptsDrag = useCallback((e: DragEvent) => (hasType(e, CLASS_MIME) && !readOnly && !!activeClass) || (hasType(e, VARIABLE_MIME) && !!activeClass), [readOnly, activeClass]);
@@ -164,7 +177,7 @@ export function Canvas(): JSX.Element {
 
   return (
     <div ref={containerRef} className={classes} style={style} onDragOver={onDragOver} onDragEnter={onDragOver} onDragLeave={onDragLeave} onDrop={(e) => void onDrop(e)}>
-      <DiagramSvg diagram={diagram} viewport={viewport} readOnly={readOnly} showGrid={showGrid} interactionsRef={interactionsRef} />
+      <DiagramSvg diagram={diagram} viewport={viewport} readOnly={readOnly} showGrid={showGrid} interactionsRef={interactionsRef} tool={tool} />
 
       {!activeClass && <div className="canvas-message">Select a class in the Workspace panel to open its diagram.</div>}
       {activeClass && !diagram && diagramError && (
@@ -195,8 +208,30 @@ export function Canvas(): JSX.Element {
       <TimeSlider />
 
       <div className="zoom-readout">
+        <div className="chip canvas-tools" role="group" aria-label="Canvas tool">
+          <Tooltip text="Select (V)">
+            <button type="button" className={`canvas-tool${tool === 'select' ? ' active' : ''}`} aria-pressed={tool === 'select'} aria-label="Select tool" onClick={() => setTool('select')}>
+              <Icon.SelectTool size={16} />
+            </button>
+          </Tooltip>
+          <Tooltip text="Pan (H) · right-drag also pans">
+            <button type="button" className={`canvas-tool${tool === 'pan' ? ' active' : ''}`} aria-pressed={tool === 'pan'} aria-label="Pan tool" onClick={() => setTool('pan')}>
+              <Icon.PanTool size={16} />
+            </button>
+          </Tooltip>
+        </div>
         <div className="chip zoom-chip">
+          <Tooltip text="Zoom out (Ctrl −)">
+            <button type="button" className="zoom-step" aria-label="Zoom out" onClick={() => viewport.zoomBy(0.8)}>
+              <Icon.ZoomOut size={16} />
+            </button>
+          </Tooltip>
           <span className="zoom-value">{Math.round(viewport.vp.scale * 100)}%</span>
+          <Tooltip text="Zoom in (Ctrl +)">
+            <button type="button" className="zoom-step" aria-label="Zoom in" onClick={() => viewport.zoomBy(1.25)}>
+              <Icon.ZoomIn size={16} />
+            </button>
+          </Tooltip>
           <button className="zoom-fit" onClick={() => viewport.fit()} title="Fit to view (F)">
             Fit
           </button>

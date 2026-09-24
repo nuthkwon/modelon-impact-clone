@@ -86,9 +86,20 @@ strip with a "Libraries" icon.
   "Show grid" turns on thin 1px solid `--grid-line` lines every 20 model units, "Enable
   snapping" snaps moves to the grid.
 - The class's `Diagram` coordinate system extent is fitted into the viewport on open (padding
-  40px). Zoom: `Ctrl` + wheel, `Ctrl` `+`/`-`, pinch; pan: wheel (no modifier scrolls), middle
-  mouse or `Space`+drag. Zoom range 10%–800%. A small zoom % readout with "Fit" button sits at
-  the bottom-right corner of the canvas above the strip.
+  40px). Zoom range 10%–800%.
+- Navigation follows Impact: the mouse wheel scrolls the view (`Shift`+wheel horizontally),
+  `Ctrl`+wheel / pinch and `Ctrl` `+`/`-` zoom about the last pointer position, `Ctrl 0`/`F`
+  fit. In addition the canvas offers hand panning:
+  - **Pan tool** (open-hand icon in the bottom-right toolbar, key `H`): every left drag moves
+    the view with a grab/grabbing cursor; `V`, `Esc` or the arrow icon return to the **Select
+    tool** (default).
+  - **Right-button drag** pans; a right click without movement still opens the context menu.
+  - **Middle-button drag** and **`Space`+drag** pan (open hand while `Space` is held).
+  - On a read-only canvas (Experiment/Results mode, library classes) a left drag on the empty
+    background pans; `Shift`+drag draws a selection rectangle.
+  - In the Select tool on an editable canvas a left drag on the background draws the selection
+    rectangle, as in Impact.
+- Bottom-right toolbar: [Select | Pan] tool toggle, then [− zoom % + | FIT].
 - Components render their resolved icon layer (own + inherited graphics, base classes first)
   inside their `Placement.transformation` (see core `placementMatrix`). Icon texts substitute
   `%name` → component name, `%class` → short class name, `%<param>` → the parameter's value
@@ -364,6 +375,7 @@ soft shadow; inputs borderless `--input-bg` 4px radius; list containers `--surfa
 ## 10. Keyboard shortcuts
 
 `1/2/3` modes · `Ctrl+S` save code · `Ctrl+Z/Y` undo/redo · `Delete` delete selection ·
-`Ctrl+C/V` copy/paste · `Ctrl +/-/0` zoom in/out/fit · `Esc` cancel connection/deselect ·
+`Ctrl+C/V` copy/paste · `Ctrl +/-/0` zoom in/out/fit · `H`/`V` pan/select tool ·
+right/middle-drag or `Space`+drag pan · `Esc` cancel connection/deselect (or leave the pan tool) ·
 `←/→` step time slider · `F` fit to view · `Shift` while connecting = advanced dialog (not
 implemented: shows tooltip) · `?` opens the shortcuts dialog.

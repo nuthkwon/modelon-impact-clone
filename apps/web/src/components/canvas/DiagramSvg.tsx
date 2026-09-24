@@ -15,7 +15,7 @@ import { ComponentNode } from './ComponentNode';
 import { ConnectionPath } from './ConnectionPath';
 import { ConnectTargetHighlight, LabelsLayer, ResultFrames, RubberBand, SelectionLayer } from './SelectionLayer';
 import { collectPortAnchors, domainColor, GRID_STEP, orthogonalRoute, snapDelta, visibleExtent, type ConnectorInfo } from './geometry';
-import { useInteractions, type InteractionApi, type InteractionState } from './useInteractions';
+import { cursorStateOf, useInteractions, type CanvasTool, type InteractionApi, type InteractionState } from './useInteractions';
 import type { ViewportApi } from './useViewport';
 
 const EMPTY_SELECTION: string[] = [];
@@ -63,9 +63,11 @@ export interface DiagramSvgProps {
   showGrid: boolean;
   /** Exposes the interaction API (cancel/delete/copy/paste) to the container for keyboard shortcuts. */
   interactionsRef: MutableRefObject<InteractionApi | null>;
+  /** Active canvas tool (Select / Pan). */
+  tool?: CanvasTool;
 }
 
-export function DiagramSvg({ diagram, viewport, readOnly, showGrid, interactionsRef }: DiagramSvgProps) {
+export function DiagramSvg({ diagram, viewport, readOnly, showGrid, interactionsRef, tool = 'select' }: DiagramSvgProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const gridId = useId().replace(/[^a-zA-Z0-9_-]/g, '');
   const selection = useStore((s) => s.selection) ?? EMPTY_SELECTION;
@@ -79,7 +81,7 @@ export function DiagramSvg({ diagram, viewport, readOnly, showGrid, interactions
   const connectorInfo = useMemo(() => makeConnectorInfo(useStore.getState().registry), [registryVersion]);
   const anchors = useMemo(() => (diagram ? collectPortAnchors(diagram, connectorInfo) : []), [diagram, connectorInfo]);
 
-  const api = useInteractions({ svgRef, diagram, viewport, readOnly, anchors, onTooltip });
+  const api = useInteractions({ svgRef, diagram, viewport, readOnly, anchors, onTooltip, tool });
   interactionsRef.current = api;
   const { state } = api;
 
@@ -105,7 +107,7 @@ export function DiagramSvg({ diagram, viewport, readOnly, showGrid, interactions
 
   const { vp, size } = viewport;
   const grid = showGrid && size.width > 0 ? visibleExtent(vp, size.width, size.height) : undefined;
-  const cursorState = state.kind === 'idle' ? (api.spaceHeld ? 'space' : 'idle') : state.kind;
+  const cursorState = cursorStateOf(state, api.spaceHeld, tool);
 
   return (
     <>

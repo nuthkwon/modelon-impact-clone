@@ -28,9 +28,14 @@
   outline: none;
   cursor: default;
 }
-.diagram-svg[data-state='space'],
-.diagram-svg[data-state='pan'] { cursor: grab; }
-.diagram-svg[data-state='pan'] { cursor: grabbing; }
+/* Hand cursors: open hand while the Pan tool is active / Space is held, closed hand while panning.
+   The descendant rules override the pointer/move cursors of components, ports and connections. */
+.diagram-svg[data-state='hand'],
+.diagram-svg[data-state='hand'] * { cursor: grab; }
+.diagram-svg[data-state='pan'],
+.diagram-svg[data-state='pan'] * { cursor: grabbing; }
+/* Read-only canvas: dragging the empty background pans. */
+.canvas.read-only .diagram-svg[data-state='idle'] { cursor: grab; }
 .diagram-svg[data-state='move'] { cursor: move; }
 .diagram-svg[data-state='rotate'] { cursor: grabbing; }
 .diagram-svg[data-state='connect'] { cursor: crosshair; }
@@ -189,8 +194,25 @@
   right: 12px;
   bottom: calc(var(--canvas-bottom-inset) + 12px);
   z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
-.zoom-chip { padding: 0 4px 0 12px; box-shadow: var(--shadow-1); gap: 6px; }
+.zoom-chip { padding: 0 4px; box-shadow: var(--shadow-1); gap: 2px; }
+.canvas-tools { padding: 0 3px; box-shadow: var(--shadow-1); gap: 2px; }
+.canvas-tool,
+.zoom-step {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 20px;
+  border-radius: var(--radius-pill);
+  color: var(--text-secondary);
+}
+.canvas-tool:hover,
+.zoom-step:hover { background: var(--hover); color: var(--text-primary); }
+.canvas-tool.active { background: var(--accent-soft); color: var(--accent); }
 .zoom-value { min-width: 34px; text-align: right; font-variant-numeric: tabular-nums; }
 .zoom-fit {
   height: 20px;
