@@ -6,7 +6,7 @@
  */
 import type { ComponentView, ConnectionView, Extent, Point } from '@impact/core';
 import type { Viewport } from '../../store/types';
-import { componentBounds, diagramToScreen, extentCorners, iconHasNameText, rotatePoint, type PortAnchor } from './geometry';
+import { componentBounds, diagramToScreen, extentCorners, iconHasNameText, isPlaced, rotatePoint, type PortAnchor } from './geometry';
 import type { InteractionState } from './useInteractions';
 
 const HANDLE = 6;
@@ -80,7 +80,8 @@ export interface SelectionLayerProps {
 }
 
 export function SelectionLayer({ components, selection, selectedConnection, vp, state, readOnly }: SelectionLayerProps) {
-  const selected = selection.map((n) => components.find((c) => c.name === n)).filter((c): c is ComponentView => !!c);
+  // Undrawn components (no Placement / visible=false) get no outline: their hidden default extent says nothing about where they are.
+  const selected = selection.map((n) => components.find((c) => c.name === n)).filter((c): c is ComponentView => !!c && isPlaced(c));
   const connPoints = state.kind === 'editConnection' && selectedConnection && state.equationIndex === selectedConnection.equationIndex ? state.points : selectedConnection?.line.points;
   return (
     <g className="canvas-selection">
@@ -115,7 +116,7 @@ export function SelectionLayer({ components, selection, selectedConnection, vp, 
               <rect
                 key={i}
                 className="selection-handle connection-handle"
-                data-connection={readOnly ? undefined : selectedConnection.equationIndex}
+                data-connection={readOnly || selectedConnection.inherited ? undefined : selectedConnection.equationIndex}
                 x={sx - HANDLE / 2}
                 y={sy - HANDLE / 2}
                 width={HANDLE}

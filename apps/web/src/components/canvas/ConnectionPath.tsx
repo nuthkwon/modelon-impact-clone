@@ -2,6 +2,9 @@
  * A `connect()` equation drawn as its `Line` annotation: polyline (or smoothed Bezier) in the
  * annotation colour, hairline thickness via non-scaling strokes, optional arrowheads, plus a
  * wide transparent hit path (10px) for selection. Selected connections get an accent glow.
+ * Editable connections carry `data-connection=<equationIndex>`; inherited ones (equationIndex -1,
+ * from a base class) carry `data-connection-inherited=<index in diagram.connections>` instead so
+ * they can be selected and identified individually but never dragged, edited or deleted.
  */
 import { memo, useId } from 'react';
 import type { ConnectionView, Point } from '@impact/core';
@@ -10,6 +13,8 @@ import { polyPath, smoothPath, strokePx } from '../graphics/GraphicsLayerSvg';
 
 export interface ConnectionPathProps {
   connection: ConnectionView;
+  /** Index in `diagram.connections` (identity of inherited connections, whose equationIndex is -1). */
+  index: number;
   selected: boolean;
   /** Points shown while the line is being edited (diagram coordinates). */
   livePoints?: Point[];
@@ -26,7 +31,7 @@ function dash(pattern: ConnectionView['line']['pattern'], px: number): string | 
   }
 }
 
-export const ConnectionPath = memo(function ConnectionPath({ connection, selected, livePoints }: ConnectionPathProps) {
+export const ConnectionPath = memo(function ConnectionPath({ connection, index, selected, livePoints }: ConnectionPathProps) {
   const uid = useId().replace(/[^a-zA-Z0-9_-]/g, '');
   const { line } = connection;
   const pts = livePoints ?? line.points;
@@ -42,7 +47,11 @@ export const ConnectionPath = memo(function ConnectionPath({ connection, selecte
     </marker>
   );
   return (
-    <g className={`connection${selected ? ' selected' : ''}${livePoints ? ' editing' : ''}`} data-connection={connection.equationIndex}>
+    <g
+      className={`connection${selected ? ' selected' : ''}${livePoints ? ' editing' : ''}${connection.inherited ? ' inherited' : ''}`}
+      data-connection={connection.inherited ? undefined : connection.equationIndex}
+      data-connection-inherited={connection.inherited ? index : undefined}
+    >
       {(a0 !== 'None' || a1 !== 'None') && (
         <defs>
           {a0 !== 'None' && marker(`${uid}-s`, a0, false)}

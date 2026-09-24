@@ -88,7 +88,14 @@ export function DiagramSvg({ diagram, viewport, readOnly, showGrid, interactions
 
   const selectedSet = useMemo(() => new Set(selection), [selection]);
   const connectFrom = state.kind === 'connect' ? state.from : undefined;
-  const connection = useMemo(() => (selectedConnection !== undefined ? diagram?.connections.find((c) => c.equationIndex === selectedConnection) : undefined), [diagram, selectedConnection]);
+  // `selectedConnection` -1 stands for "an inherited connection"; which one is the canvas-local index.
+  const inheritedSelected = selectedConnection === -1 ? api.inheritedSelection : undefined;
+  const connection = useMemo(() => {
+    if (!diagram || selectedConnection === undefined) return undefined;
+    if (selectedConnection >= 0) return diagram.connections.find((c) => c.equationIndex === selectedConnection);
+    const c = inheritedSelected !== undefined ? diagram.connections[inheritedSelected] : undefined;
+    return c?.inherited ? c : undefined;
+  }, [diagram, selectedConnection, inheritedSelected]);
 
   const liveTransform = (name: string): string | undefined => {
     if (displayState.kind === 'move' && displayState.names.includes(name)) return `translate(${displayState.delta[0]} ${displayState.delta[1]})`;
@@ -108,6 +115,7 @@ export function DiagramSvg({ diagram, viewport, readOnly, showGrid, interactions
         data-state={cursorState}
         width="100%"
         height="100%"
+        tabIndex={-1}
         onDragStart={(e) => e.preventDefault()}
         {...api.handlers}
       >
@@ -126,12 +134,13 @@ export function DiagramSvg({ diagram, viewport, readOnly, showGrid, interactions
                 <GraphicsItems items={diagram.diagram.graphics} />
               </g>
               <g className="connections">
-                {diagram.connections.map((c) => (
+                {diagram.connections.map((c, i) => (
                   <ConnectionPath
-                    key={c.equationIndex}
+                    key={c.inherited ? `${c.from}->${c.to}#${i}` : c.equationIndex}
                     connection={c}
-                    selected={c.equationIndex === selectedConnection}
-                    livePoints={state.kind === 'editConnection' && state.equationIndex === c.equationIndex ? state.points : undefined}
+                    index={i}
+                    selected={c.inherited ? inheritedSelected === i : c.equationIndex === selectedConnection}
+                    livePoints={!c.inherited && state.kind === 'editConnection' && state.equationIndex === c.equationIndex ? state.points : undefined}
                   />
                 ))}
               </g>

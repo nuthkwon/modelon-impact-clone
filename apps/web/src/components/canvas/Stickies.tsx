@@ -1,5 +1,6 @@
 /**
- * Stickies (UI_SPEC §5.4 / §9): white cards attached to a component (offset in diagram units).
+ * Stickies (UI_SPEC §5.4 / §9): white cards attached to a component (`dx`/`dy` = offset in diagram
+ * units from the component's visual centre, so the card follows moves and rotations).
  * A card lists every sticky of one component: title row = component name (600), one row per
  * variable = orange bullet, short variable name, the value in an `--accent-chip` chip and the
  * grey unit. Editable stickies (parameters) show the chip as an input that rewrites the
@@ -14,7 +15,7 @@ import { useStore } from '../../store';
 import type { Sticky, Viewport } from '../../store/types';
 import { Icon } from '../icons';
 import { displayInfo, displayUnitOf, type VariableMetaMap, unitOf, useCaseMeta } from '../results/resultMeta';
-import { diagramToScreen, round2, shortClassName } from './geometry';
+import { componentCenter, diagramToScreen, round2, shortClassName } from './geometry';
 
 const EMPTY: Sticky[] = [];
 
@@ -76,7 +77,8 @@ function StickyCard({ group, className, diagram, vp, readOnly }: StickyCardProps
 
   const lead = group.stickies[0];
   const component = group.component ? diagram?.components.find((c) => c.name === group.component) : undefined;
-  const origin: Point = component ? component.placement.transformation.origin : [0, 0];
+  // Not `transformation.origin`: that is {0,0} for every unrotated component (canonical form).
+  const origin: Point = component ? componentCenter(component) : [0, 0];
   const [drag, setDrag] = useState<{ dx: number; dy: number } | null>(null);
   const dx = drag ? drag.dx : lead.dx;
   const dy = drag ? drag.dy : lead.dy;

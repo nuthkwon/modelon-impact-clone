@@ -107,18 +107,35 @@ const ownInput: ComponentView = {
   isConnector: true,
 };
 
+/** Canonical unrotated form as written by the editor: origin {0,0}, absolute extent → visual centre (20, 0). */
+const capacitor: ComponentView = {
+  ...ground,
+  name: 'capacitor',
+  className: 'Modelica.Electrical.Analog.Basic.Capacitor',
+  shortClassName: 'Capacitor',
+  placement: { visible: true, transformation: { origin: [0, 0], extent: [[10, -10], [30, 10]], rotation: 0 } },
+};
+
+/** Declared without a Placement annotation: `hiddenPlacement()` (visible=false at the origin), not drawn. */
+const hiddenGround: ComponentView = {
+  ...ground,
+  name: 'g2',
+  placement: { visible: false, transformation: { origin: [0, 0], extent: [[-10, -10], [10, 10]], rotation: 0 } },
+  hasPlacement: false,
+};
+
+const line = (points: [number, number][]) => ({ points, color: [0, 0, 255] as [number, number, number], pattern: 'Solid' as const, thickness: 0.25, smooth: 'None' as const, arrow: ['None', 'None'] as ['None', 'None'] });
+
 const diagram: DiagramView = {
   className: 'Lib.T',
   diagram: { coordinateSystem: DEFAULT_COORDINATE_SYSTEM, graphics: [] },
   icon: { coordinateSystem: DEFAULT_COORDINATE_SYSTEM, graphics: [] },
-  components: [resistor, ground, ownInput],
+  components: [resistor, ground, ownInput, capacitor, hiddenGround],
   connections: [
-    {
-      from: 'resistor.n',
-      to: 'ground.p',
-      equationIndex: 0,
-      line: { points: [[10, 20], [30, 20], [30, -40], [0, -40]], color: [0, 0, 255], pattern: 'Solid', thickness: 0.25, smooth: 'None', arrow: ['None', 'None'] },
-    },
+    { from: 'resistor.n', to: 'ground.p', equationIndex: 0, line: line([[10, 20], [30, 20], [30, -40], [0, -40]]) },
+    // Inherited from a base class: equationIndex -1 (shared by every inherited connection).
+    { from: 'capacitor.p', to: 'ground.p', equationIndex: -1, inherited: true, line: line([[20, -10], [20, -40], [0, -40]]) },
+    { from: 'resistor.p', to: 'capacitor.n', equationIndex: -1, inherited: true, line: line([[-10, 20], [-10, 60], [30, 60], [30, 10]]) },
   ],
   diagnostics: [],
 };
@@ -244,6 +261,38 @@ describe('Canvas rendering', () => {
     expect(html).toContain('class="zoom-value">100%<');
     expect(html).toContain('views-fab');
     expect(html).toContain('log-toggle');
+  });
+
+  it('anchors stickies to the component\'s visual centre, not to transformation.origin', () => {
+    // capacitor: origin {0,0}, extent {{10,-10},{30,10}} → centre (20,0); offset (10,10) → diagram (30,10) → screen (30,-10) at the identity viewport
+    seed({ stickies: { 'Lib.T': [{ id: 's1', component: 'capacitor', variable: 'capacitor.v', dx: 10, dy: 10, pinned: false, editable: false }] } });
+    const html = render();
+    expect(html).toMatch(/class="sticky" style="left:30px;top:-10px"/);
+  });
+
+  it('marks inherited connections by their array index and keeps them out of the editable hit testing', () => {
+    const html = render();
+    expect(html).toContain('data-connection="0"');
+    expect(html).not.toContain('data-connection="-1"');
+    expect(html).toMatch(/class="connection inherited" data-connection-inherited="1"/);
+    expect(html).toMatch(/class="connection inherited" data-connection-inherited="2"/);
+    expect((html.match(/data-connection-inherited=/g) ?? []).length).toBe(2);
+  });
+
+  it('selecting an inherited connection (selectedConnection -1) draws no draggable corner handles', () => {
+    seed({ selectedConnection: -1 });
+    const html = render();
+    // The store alone cannot say which inherited connection is meant; nothing is highlighted and no handle carries data-connection.
+    expect(html).not.toContain('class="connection selected"');
+    expect(html).not.toMatch(/connection-handle" data-connection=/);
+  });
+
+  it('does not draw a selection outline for undrawn components', () => {
+    seed({ selection: ['resistor', 'g2'] });
+    const html = render();
+    expect(html).not.toContain('data-component="g2"');
+    expect((html.match(/class="selection-outline"/g) ?? []).length).toBe(1);
+    expect(html).not.toContain('data-handle="rotate" data-component="g2"');
   });
 
   it('shows the running state with a progress ring and phase chip', () => {

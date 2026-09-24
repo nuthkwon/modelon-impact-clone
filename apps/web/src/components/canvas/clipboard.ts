@@ -1,19 +1,30 @@
 /**
- * Component clipboard (module state, not the system clipboard). Copy stores the class,
- * placement and modified parameters of each component; paste re-adds them offset by 20 units.
+ * Component clipboard (module state, not the system clipboard). Copy stores the class, the
+ * visual centre, the placement and the modified parameters of each component; paste re-adds
+ * them offset by 20 units (UI_SPEC §5.1) from where the original is drawn.
  */
-import type { ComponentView, DiagramView, EditOperation, EditResult, Placement } from '@impact/core';
-import { extentSize } from '@impact/core';
+import type { ComponentView, DiagramView, EditOperation, EditResult, Placement, Point } from '@impact/core';
+import { extentCenter, extentSize, placementBounds } from '@impact/core';
 
 export interface ClipboardEntry {
   className: string;
   placement: Placement;
+  /**
+   * Visual centre of the copied component in diagram coordinates. `transformation.origin` is not
+   * the position: unrotated components are stored with origin {0,0} and an absolute extent.
+   */
+  center: Point;
   parameters: { name: string; valueText: string }[];
 }
 
 let clipboard: ClipboardEntry[] = [];
 
 export const PASTE_OFFSET = 20;
+
+/** Where a pasted copy of `entry` goes: 20 units right of and below the original. */
+export function pastePosition(entry: Pick<ClipboardEntry, 'center'>): Point {
+  return [entry.center[0] + PASTE_OFFSET, entry.center[1] - PASTE_OFFSET];
+}
 
 export function copyComponents(diagram: DiagramView | undefined, names: string[]): number {
   if (!diagram) return 0;
@@ -24,6 +35,7 @@ export function copyComponents(diagram: DiagramView | undefined, names: string[]
     .map((c) => ({
       className: c.className,
       placement: JSON.parse(JSON.stringify(c.placement)) as Placement,
+      center: extentCenter(placementBounds(c.placement, c.icon.coordinateSystem)),
       parameters: c.parameters.filter((p) => p.valueText !== undefined && p.valueText !== '' && !p.final && !p.constant).map((p) => ({ name: p.name, valueText: p.valueText! })),
     }));
   return clipboard.length;
@@ -43,7 +55,7 @@ export async function pasteComponents(applyEdit: (op: EditOperation) => Promise<
       op: 'addComponent',
       className: entry.className,
       name: undefined,
-      position: [t.origin[0] + PASTE_OFFSET, t.origin[1] - PASTE_OFFSET],
+      position: pastePosition(entry),
       rotation: t.rotation,
       size: w > 0 ? w : undefined,
     });
@@ -53,9 +65,6 @@ export async function pasteComponents(applyEdit: (op: EditOperation) => Promise<
     for (const p of entry.parameters) await applyEdit({ op: 'setParameter', component: name, name: p.name, valueText: p.valueText });
   }
   // Subsequent pastes land further away.
-  clipboard = clipboard.map((e) => ({
-    ...e,
-    placement: { ...e.placement, transformation: { ...e.placement.transformation, origin: [e.placement.transformation.origin[0] + PASTE_OFFSET, e.placement.transformation.origin[1] - PASTE_OFFSET] } },
-  }));
+  clipboard = clipboard.map((e) => ({ ...e, center: pastePosition(e) }));
   return created;
 }

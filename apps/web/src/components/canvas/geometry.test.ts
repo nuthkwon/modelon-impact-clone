@@ -6,6 +6,7 @@ import {
   causalBase,
   classifyPort,
   collectPortAnchors,
+  componentCenter,
   componentsInRect,
   dedupePoints,
   diagramToScreen,
@@ -259,6 +260,58 @@ describe('port anchors', () => {
     expect(componentsInRect(diagram.components, [[0, 0], [15, 25]])).toEqual(['resistor']);
     expect(componentsInRect(diagram.components, [[-100, -20], [40, 40]]).sort()).toEqual(['resistor', 'u']);
     expect(componentsInRect(diagram.components, [[50, 50], [60, 60]])).toEqual([]);
+  });
+
+  it('ignores undrawn components (no Placement / visible=false) for rubber bands and connection targets', () => {
+    // `hiddenPlacement()`: visible=false with the default {{-10,-10},{10,10}} extent at the origin.
+    const hidden: ComponentView = { ...comp('g2', [0, 0], [portView('p', 0)]), placement: { visible: false, transformation: { origin: [0, 0], extent: [[-10, -10], [10, 10]], rotation: 0 } }, hasPlacement: false };
+    const capacitor = comp('capacitor', [0, 0], [portView('p', 0)]);
+    const withHidden: DiagramView = { ...diagram, components: [capacitor, hidden] };
+    expect(componentsInRect(withHidden.components, [[-12, -12], [12, 12]])).toEqual(['capacitor']);
+    const found = collectPortAnchors(withHidden, () => ({ causality: 'none', physical: true }));
+    expect(found.map((a) => a.ref)).toEqual(['capacitor.p']);
+    expect(findPortAt(found, [0, 0], 1)?.ref).toBe('capacitor.p');
+  });
+});
+
+describe('component centre (rotation pivot)', () => {
+  const icon = { coordinateSystem: DEFAULT_COORDINATE_SYSTEM, graphics: [] };
+  const view = (placement: ComponentView['placement']): ComponentView => ({
+    name: 'resistor',
+    className: 'Modelica.Electrical.Analog.Basic.Resistor',
+    shortClassName: 'Resistor',
+    restriction: 'model',
+    placement,
+    icon,
+    ports: [],
+    parameters: [],
+    isConnector: false,
+  });
+
+  it('is the extent centre for the canonical unrotated form (origin {0,0}, absolute extent)', () => {
+    // Examples.RCCircuit `resistor`: Placement(transformation(extent={{-30,30},{-10,50}}))
+    const c = view({ visible: true, transformation: { origin: [0, 0], extent: [[-30, 30], [-10, 50]], rotation: 0 } });
+    expect(componentCenter(c)).toEqual([-20, 40]);
+  });
+
+  it('is origin + R(rotation)·centre(extent) for rotated and flipped placements', () => {
+    const rotated = view({ visible: true, transformation: { origin: [10, 10], extent: [[-10, -10], [10, 10]], rotation: 90 } });
+    expect(componentCenter(rotated)).toEqual([10, 10]);
+    const offCentre = view({ visible: true, transformation: { origin: [10, 10], extent: [[0, 0], [20, 20]], rotation: 90 } });
+    const [cx, cy] = componentCenter(offCentre);
+    expect(cx).toBeCloseTo(0); // (10,10) + R90·(10,10) = (10,10) + (-10,10)
+    expect(cy).toBeCloseTo(20);
+    const flipped = view({ visible: true, transformation: { origin: [0, 0], extent: [[-10, 50], [-30, 30]], rotation: 0 } });
+    expect(componentCenter(flipped)).toEqual([-20, 40]);
+  });
+
+  it('makes a quarter-turn drag of the rotation handle measure 90° about the component, not the diagram origin', () => {
+    const c = view({ visible: true, transformation: { origin: [0, 0], extent: [[-30, 30], [-10, 50]], rotation: 0 } });
+    const from: Point = [-10, 50]; // top-right corner (handle)
+    const to: Point = [-30, 50]; // dragged a quarter turn around the icon
+    expect(snapAngle(angleBetween(componentCenter(c), from, to), 90)).toBe(90);
+    // Regression: the transformation origin is the diagram origin here and gives a useless 19.65°.
+    expect(snapAngle(angleBetween(c.placement.transformation.origin, from, to), 90)).toBe(0);
   });
 });
 

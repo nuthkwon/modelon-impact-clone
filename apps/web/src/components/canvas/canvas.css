@@ -51,6 +51,8 @@
 .canvas.editable .diagram-svg[data-state='idle'] .component { cursor: move; }
 .component-hit, .port-hit { pointer-events: all; }
 .canvas.editable .diagram-svg[data-state='idle'] .port { cursor: crosshair; }
+/* An unselected own connector starts a connection when dragged (a selected one moves). */
+.canvas.editable .diagram-svg[data-state='idle'] .component.own-connector:not(.selected) { cursor: crosshair; }
 .canvas.read-only .port { cursor: default; }
 
 .port-halo {
@@ -75,6 +77,8 @@
 
 .connection-hit { cursor: pointer; }
 .canvas.editable .diagram-svg[data-state='idle'] .connection-hit { cursor: pointer; }
+/* Inherited connections (from a base class) are selectable but not editable. */
+.canvas .diagram-svg .connection.inherited .connection-hit { cursor: default; }
 .connection-glow {
   stroke: var(--accent);
   stroke-opacity: 0.3;

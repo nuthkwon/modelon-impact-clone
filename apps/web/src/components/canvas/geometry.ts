@@ -239,7 +239,8 @@ export function portRefOf(view: PortView, component: string): PortLike & { ref: 
 export function collectPortAnchors(diagram: DiagramView, connectorInfo: (className: string) => ConnectorInfo): PortAnchor[] {
   const out: PortAnchor[] = [];
   for (const c of diagram.components) {
-    if (c.disabled) continue;
+    // Disabled (conditional) and undrawn components (no Placement / visible=false) have no ports on the canvas.
+    if (c.disabled || !isPlaced(c)) continue;
     const cm = placementMatrix(c.placement, c.icon.coordinateSystem);
     if (c.isConnector) {
       const info = connectorInfo(c.className);
@@ -403,14 +404,29 @@ export function extentsIntersect(a: Extent, b: Extent): boolean {
   return na[0][0] <= nb[1][0] && na[1][0] >= nb[0][0] && na[0][1] <= nb[1][1] && na[1][1] >= nb[0][1];
 }
 
-/** Components whose placement bounds intersect `rect` (diagram coordinates). */
+/** True when the component is drawn on the canvas: it has a `Placement` and is not `visible=false` (see `hiddenPlacement`). */
+export function isPlaced(c: ComponentView): boolean {
+  return c.placement.visible !== false;
+}
+
+/** Drawn components whose placement bounds intersect `rect` (diagram coordinates); hidden components are never hit. */
 export function componentsInRect(components: ComponentView[], rect: Extent): string[] {
-  return components.filter((c) => extentsIntersect(placementBounds(c.placement, c.icon.coordinateSystem), rect)).map((c) => c.name);
+  return components.filter((c) => isPlaced(c) && extentsIntersect(placementBounds(c.placement, c.icon.coordinateSystem), rect)).map((c) => c.name);
 }
 
 /** Bounds of a component in diagram coordinates. */
 export function componentBounds(c: ComponentView): Extent {
   return placementBounds(c.placement, c.icon.coordinateSystem);
+}
+
+/**
+ * Visual centre of a placed component in diagram coordinates: `origin + R(rotation) · centre(extent)`,
+ * the same pivot core's `rotateComponent`/`flipComponent` use (`centerTransformation`). Note that
+ * `transformation.origin` is *not* the position: unrotated components are stored in canonical form
+ * with origin {0,0} and an absolute extent.
+ */
+export function componentCenter(c: ComponentView): Point {
+  return extentCenter(componentBounds(c));
 }
 
 /** True when the icon contains a `%name` text item (so no extra name label is needed). */

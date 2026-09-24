@@ -9,6 +9,11 @@
  *  - rotation handle  → `rotateComponent`
  *  - port to port     → `addConnection`
  *  - segment/corner   → `setConnectionPoints`
+ *
+ * The model's own connectors (`isConnector`) double as ports: dragging an *unselected* one draws
+ * a connection, a plain click selects it and a selected one is moved like any other component.
+ * Inherited connections (`equationIndex` -1) can be selected for inspection (by their index in
+ * `diagram.connections`) but never dragged, edited or deleted.
  */
 import { createElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent, MouseEvent as ReactMouseEvent, RefObject } from 'react';
@@ -23,6 +28,7 @@ import { clipboardSize, copyComponents, pasteComponents } from './clipboard';
 import {
   angleBetween,
   classifyPort,
+  componentCenter,
   componentsInRect,
   dedupePoints,
   domainColor,
@@ -41,6 +47,7 @@ import {
 } from './geometry';
 import type { ViewportApi } from './useViewport';
 import type { TooltipState } from './CanvasTooltip';
+import { canvasOwnsKey, isPointerOver } from './keyScope';
 
 const DRAG_THRESHOLD_PX = 3;
 const PORT_TOLERANCE_PX = 6;
@@ -51,7 +58,16 @@ export type ConnectionEditMode = { type: 'segment'; index: number } | { type: 'c
 export type InteractionState =
   | { kind: 'idle' }
   | { kind: 'pan'; startClient: Point; startVp: Viewport }
-  | { kind: 'press'; name: string; startScreen: Point; start: Point; additive: boolean; wasSelected: boolean }
+  | {
+      kind: 'press';
+      name: string;
+      startScreen: Point;
+      start: Point;
+      additive: boolean;
+      wasSelected: boolean;
+      /** Set for a press on an unselected own connector: dragging starts a connection from it instead of moving it. */
+      connectFrom?: PortAnchor;
+    }
   | { kind: 'move'; names: string[]; start: Point; delta: Point }
   | { kind: 'rubber'; start: Point; current: Point; additive: boolean }
   | { kind: 'rotate'; name: string; center: Point; startPoint: Point; delta: number }
@@ -85,6 +101,8 @@ export interface InteractionApi {
   state: InteractionState;
   handlers: InteractionHandlers;
   spaceHeld: boolean;
+  /** Index (in `diagram.connections`) of the inherited connection last clicked; meaningful while `store.selectedConnection === -1`. */
+  inheritedSelection: number | undefined;
   cancel(): void;
   deleteSelection(): void;
   copySelection(): void;
@@ -107,6 +125,7 @@ export function useInteractions({ svgRef, diagram, viewport, readOnly, anchors, 
   stateRef.current = state;
   const [spaceHeld, setSpaceHeld] = useState(false);
   const spaceRef = useRef(false);
+  const [inheritedSelection, setInheritedSelection] = useState<number | undefined>(undefined);
   const ctx = useContextMenu();
   const shell = useShellActions();
 
@@ -145,10 +164,16 @@ export function useInteractions({ svgRef, diagram, viewport, readOnly, anchors, 
   useEffect(() => {
     const isEditable = (t: EventTarget | null) => t instanceof HTMLElement && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
     const down = (e: KeyboardEvent) => {
-      if (e.code === 'Space' && !isEditable(e.target) && !spaceRef.current) {
+      if (e.code !== 'Space' || isEditable(e.target)) return;
+      if (!spaceRef.current) {
         spaceRef.current = true;
         setSpaceHeld(true);
-        if (stateRef.current.kind === 'idle') e.preventDefault();
+      }
+      // Swallow the key (page scroll) only when it is aimed at the diagram — focus on it, or nothing
+      // focused while the pointer is over it. A focused button elsewhere must still be activated by Space.
+      if (stateRef.current.kind === 'idle' && !e.defaultPrevented) {
+        const svg = svgRef.current;
+        if (canvasOwnsKey(svg, e.target, isPointerOver(svg), document.body)) e.preventDefault();
       }
     };
     const up = (e: KeyboardEvent) => {
@@ -169,7 +194,7 @@ export function useInteractions({ svgRef, diagram, viewport, readOnly, anchors, 
       window.removeEventListener('keyup', up);
       window.removeEventListener('blur', blur);
     };
-  }, []);
+  }, [svgRef]);
 
   // ------------------------------------------------------------------ actions
 
@@ -177,6 +202,7 @@ export function useInteractions({ svgRef, diagram, viewport, readOnly, anchors, 
     const s = useStore.getState();
     if (readOnly) return;
     if (s.selectedConnection !== undefined) {
+      if (s.selectedConnection < 0) return; // inherited connection: read-only
       void s.applyEdit({ op: 'deleteConnection', equationIndex: s.selectedConnection });
       s.select([]);
     } else if (s.selection.length) {
@@ -236,7 +262,9 @@ export function useInteractions({ svgRef, diagram, viewport, readOnly, anchors, 
         const comp = name ? componentsByName.get(name) : undefined;
         if (comp && !readOnly) {
           capture();
-          update({ kind: 'rotate', name: comp.name, center: comp.placement.transformation.origin, startPoint: point, delta: 0 });
+          // Pivot on the visual centre: core's `rotateComponent` re-centres the transformation, so the
+          // preview must turn about the same point (the origin is {0,0} for unrotated components).
+          update({ kind: 'rotate', name: comp.name, center: componentCenter(comp), startPoint: point, delta: 0 });
         }
         return;
       }
@@ -244,7 +272,9 @@ export function useInteractions({ svgRef, diagram, viewport, readOnly, anchors, 
       const portRef = attr(e.target, '[data-port]', 'data-port');
       if (portRef && !readOnly) {
         const anchor = anchorsByRef.get(portRef);
-        if (anchor) {
+        // Ports of components start a connection right away; the model's own connectors carry
+        // `data-port` too but are components (selectable/movable) — handled below.
+        if (anchor && anchor.port !== undefined) {
           capture();
           update({ kind: 'connect', from: anchor, current: anchor.center });
           return;
@@ -252,23 +282,38 @@ export function useInteractions({ svgRef, diagram, viewport, readOnly, anchors, 
       }
 
       const compName = attr(e.target, '[data-component]', 'data-component');
-      if (compName && componentsByName.has(compName)) {
+      const comp = compName ? componentsByName.get(compName) : undefined;
+      if (comp) {
         const additive = e.shiftKey;
-        const wasSelected = store.selection.includes(compName);
-        if (!wasSelected) store.select(additive ? [...store.selection, compName] : [compName]);
-        else if (store.selectedConnection !== undefined) store.select(store.selection);
+        const wasSelected = store.selection.includes(comp.name);
+        const connectFrom = comp.isConnector && !readOnly && !wasSelected && !additive ? anchorsByRef.get(comp.name) : undefined;
+        if (!connectFrom) {
+          if (!wasSelected) store.select(additive ? [...store.selection, comp.name] : [comp.name]);
+          else if (store.selectedConnection !== undefined) store.select(store.selection);
+        }
         capture();
-        update({ kind: 'press', name: compName, startScreen: screen, start: point, additive, wasSelected });
+        update({ kind: 'press', name: comp.name, startScreen: screen, start: point, additive, wasSelected, connectFrom });
         return;
       }
 
       const connAttr = attr(e.target, '[data-connection]', 'data-connection');
       if (connAttr !== undefined) {
         const idx = Number(connAttr);
-        if (Number.isFinite(idx)) {
+        if (Number.isInteger(idx) && idx >= 0) {
           store.select([], idx);
           capture();
           update({ kind: 'pressConnection', equationIndex: idx, startScreen: screen, start: point });
+          return;
+        }
+      }
+
+      const inheritedAttr = attr(e.target, '[data-connection-inherited]', 'data-connection-inherited');
+      if (inheritedAttr !== undefined) {
+        const i = Number(inheritedAttr);
+        if (Number.isInteger(i) && i >= 0) {
+          // Selectable for inspection only: no drag/edit state is entered.
+          setInheritedSelection(i);
+          store.select([], -1);
           return;
         }
       }
@@ -291,6 +336,12 @@ export function useInteractions({ svgRef, diagram, viewport, readOnly, anchors, 
           return;
         case 'press': {
           if (dist(screen, st.startScreen) < DRAG_THRESHOLD_PX || readOnly) return;
+          if (st.connectFrom) {
+            const hit = findPortAt(anchors, point, PORT_TOLERANCE_PX / scale);
+            const target = hit && hit.ref !== st.connectFrom.ref && classifyPort(st.connectFrom, hit) === 'compatible' ? hit : undefined;
+            update({ kind: 'connect', from: st.connectFrom, current: point, target });
+            return;
+          }
           const selection = useStore.getState().selection;
           const names = selection.includes(st.name) ? selection.filter((n) => componentsByName.has(n)) : [st.name];
           update({ kind: 'move', names, start: st.start, delta: [point[0] - st.start[0], point[1] - st.start[1]] });
@@ -342,7 +393,8 @@ export function useInteractions({ svgRef, diagram, viewport, readOnly, anchors, 
       const store = useStore.getState();
       switch (st.kind) {
         case 'press':
-          if (st.additive && st.wasSelected) store.select(store.selection.filter((n) => n !== st.name));
+          if (st.connectFrom) store.select([st.name]); // plain click on an unselected own connector selects it
+          else if (st.additive && st.wasSelected) store.select(store.selection.filter((n) => n !== st.name));
           break;
         case 'move': {
           const delta = snapDelta(st.delta, store.settings.snapping);
@@ -403,6 +455,7 @@ export function useInteractions({ svgRef, diagram, viewport, readOnly, anchors, 
       const connAttr = attr(e.target, '[data-connection]', 'data-connection');
       if (connAttr !== undefined && diagram && !readOnly) {
         const idx = Number(connAttr);
+        if (!Number.isInteger(idx) || idx < 0) return;
         const conn = diagram.connections.find((c) => c.equationIndex === idx);
         if (!conn) return;
         const { point } = toDiagram(e.clientX, e.clientY);
@@ -443,9 +496,24 @@ export function useInteractions({ svgRef, diagram, viewport, readOnly, anchors, 
       const connAttr = attr(e.target, '[data-connection]', 'data-connection');
       if (connAttr !== undefined) {
         const idx = Number(connAttr);
-        store.select([], idx);
-        ctx.open(e, [{ label: 'Delete connection', icon: createElement(Icon.Delete), danger: true, disabled: readOnly, onSelect: () => void store.applyEdit({ op: 'deleteConnection', equationIndex: idx }) }]);
-        return;
+        if (Number.isInteger(idx) && idx >= 0) {
+          store.select([], idx);
+          ctx.open(e, [{ label: 'Delete connection', icon: createElement(Icon.Delete), danger: true, disabled: readOnly, onSelect: () => void store.applyEdit({ op: 'deleteConnection', equationIndex: idx }) }]);
+          return;
+        }
+      }
+      const inheritedAttr = attr(e.target, '[data-connection-inherited]', 'data-connection-inherited');
+      if (inheritedAttr !== undefined) {
+        const i = Number(inheritedAttr);
+        if (Number.isInteger(i) && i >= 0) {
+          setInheritedSelection(i);
+          store.select([], -1);
+          ctx.open(e, [
+            { label: 'Inherited connection', header: true },
+            { label: 'Delete connection', icon: createElement(Icon.Delete), danger: true, disabled: true },
+          ]);
+          return;
+        }
       }
       const showGrid = store.settings.showGrid;
       ctx.open(e, [
@@ -460,6 +528,10 @@ export function useInteractions({ svgRef, diagram, viewport, readOnly, anchors, 
   const onPointerOver = useCallback(
     (e: ReactPointerEvent<SVGSVGElement>) => {
       if (stateRef.current.kind !== 'idle') return;
+      if (attr(e.target, '[data-connection-inherited]', 'data-connection-inherited') !== undefined) {
+        onTooltip({ x: e.clientX, y: e.clientY, text: 'Inherited connection' });
+        return;
+      }
       const ref = attr(e.target, '[data-port]', 'data-port');
       if (!ref) return;
       const anchor = anchorsByRef.get(ref);
@@ -470,7 +542,7 @@ export function useInteractions({ svgRef, diagram, viewport, readOnly, anchors, 
 
   const onPointerOut = useCallback(
     (e: ReactPointerEvent<SVGSVGElement>) => {
-      if (attr(e.target, '[data-port]', 'data-port')) onTooltip(undefined);
+      if (attr(e.target, '[data-port]', 'data-port') || attr(e.target, '[data-connection-inherited]', 'data-connection-inherited') !== undefined) onTooltip(undefined);
     },
     [onTooltip],
   );
@@ -480,5 +552,5 @@ export function useInteractions({ svgRef, diagram, viewport, readOnly, anchors, 
     [onPointerDown, onPointerMove, onPointerUp, onPointerCancel, onDoubleClick, onContextMenu, onPointerOver, onPointerOut],
   );
 
-  return { state, handlers, spaceHeld, cancel, deleteSelection, copySelection, paste };
+  return { state, handlers, spaceHeld, inheritedSelection, cancel, deleteSelection, copySelection, paste };
 }
