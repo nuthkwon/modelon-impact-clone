@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ParameterInfo } from '@impact/core';
 import {
+  attributeCommitText,
   attributeValue,
   enumLiteralOf,
   filterParameters,
@@ -12,10 +13,12 @@ import {
   hasAttributeModifier,
   hasVisibleContent,
   intervalFromPoints,
+  linkedExecutionPatch,
   modelicaLinkTarget,
   parseBooleanText,
   parseNumeric,
   pointsFromInterval,
+  renameIntent,
   resolveTab,
   sanitizeHtml,
   shortClassName,
@@ -61,19 +64,60 @@ describe('groupParameters', () => {
 
 describe('attribute modifiers', () => {
   const R = param('R');
-  it('detects sibling <name>.<attr> entries with a value', () => {
-    expect(hasAttributeModifier(R, [R, param('R.start', { valueText: '1' })])).toBe(true);
-    expect(hasAttributeModifier(R, [R, param('R.start', { defaultText: '0' })])).toBe(false);
+  // core surfaces `R.start = 1` as `attributes` of R; there is no sibling parameter named `R.start`.
+  it('detects attribute modifiers reported on the parameter itself', () => {
+    expect(hasAttributeModifier(param('R', { attributes: { start: '5' } }))).toBe(true);
+    expect(hasAttributeModifier(param('R', { attributes: { start: '' } }))).toBe(false);
+    expect(hasAttributeModifier(R)).toBe(false);
+    expect(hasAttributeModifier(R, undefined, undefined, undefined)).toBe(false);
+  });
+  it('ignores attributes the class itself declares unless the component changes them', () => {
+    const declared = param('R', { attributes: { start: '1', min: '0' } });
+    expect(hasAttributeModifier(param('R', { attributes: { start: '1', min: '0' } }), undefined, 'resistor', declared)).toBe(false);
+    expect(hasAttributeModifier(param('R', { attributes: { start: '5', min: '0' } }), undefined, 'resistor', declared)).toBe(true);
+    expect(hasAttributeModifier(param('R', { attributes: { start: '1', min: '0', displayUnit: '"kOhm"' } }), undefined, 'resistor', declared)).toBe(true);
   });
   it('detects experiment modifiers keyed by the full name', () => {
-    expect(hasAttributeModifier(R, [R], { 'resistor.R.min': '0' }, 'resistor')).toBe(true);
-    expect(hasAttributeModifier(R, [R], { 'other.R.min': '0' }, 'resistor')).toBe(false);
+    expect(hasAttributeModifier(R, { 'resistor.R.min': '0' }, 'resistor')).toBe(true);
+    expect(hasAttributeModifier(R, { 'other.R.min': '0' }, 'resistor')).toBe(false);
   });
-  it('reads attribute values from the experiment first, then the sibling entry', () => {
-    const params = [R, param('R.max', { valueText: '10', defaultText: '5' })];
-    expect(attributeValue(R, 'max', params)).toBe('10');
-    expect(attributeValue(R, 'max', params, { 'resistor.R.max': '20' }, 'resistor')).toBe('20');
-    expect(attributeValue(R, 'min', params)).toBeUndefined();
+  it('reads attribute values from the experiment first, then the parameter attributes', () => {
+    const p = param('R', { attributes: { max: '10', displayUnit: '"kOhm"' } });
+    expect(attributeValue(p, 'max')).toBe('10');
+    expect(attributeValue(p, 'displayUnit')).toBe('"kOhm"');
+    expect(attributeValue(p, 'max', { 'resistor.R.max': '20' }, 'resistor')).toBe('20');
+    expect(attributeValue(p, 'min')).toBeUndefined();
+    expect(attributeValue(R, 'start')).toBeUndefined();
+  });
+  it('quotes string attributes so `R(displayUnit=kOhm)` cannot be written', () => {
+    expect(attributeCommitText('displayUnit', 'kOhm')).toBe('"kOhm"');
+    expect(attributeCommitText('displayUnit', ' kOhm ')).toBe('"kOhm"');
+    expect(attributeCommitText('displayUnit', '"kOhm"')).toBe('"kOhm"');
+    expect(attributeCommitText('unit', 'V')).toBe('"V"');
+    expect(attributeCommitText('quantity', '"Resistance"')).toBe('"Resistance"');
+    expect(attributeCommitText('displayUnit', '')).toBeNull();
+    expect(attributeCommitText('displayUnit', null)).toBeNull();
+  });
+  it('leaves numeric and Boolean attributes as expressions', () => {
+    expect(attributeCommitText('start', ' 2*pi ')).toBe('2*pi');
+    expect(attributeCommitText('fixed', 'true')).toBe('true');
+    expect(attributeCommitText('min', '')).toBeNull();
+  });
+});
+
+describe('renameIntent', () => {
+  it('ignores empty and unchanged names', () => {
+    expect(renameIntent('', 'RCCircuit')).toEqual({ kind: 'none' });
+    expect(renameIntent('  RCCircuit ', 'RCCircuit')).toEqual({ kind: 'none' });
+  });
+  it('rejects names that are not Modelica identifiers', () => {
+    expect(renameIntent('1abc', 'x')).toEqual({ kind: 'invalid', name: '1abc' });
+    expect(renameIntent('a.b', 'x')).toEqual({ kind: 'invalid', name: 'a.b' });
+    expect(renameIntent('new name', 'x')).toEqual({ kind: 'invalid', name: 'new name' });
+  });
+  it('returns the typed name to rename to', () => {
+    expect(renameIntent(' NewName ', 'RCCircuit')).toEqual({ kind: 'rename', name: 'NewName' });
+    expect(renameIntent('r1', 'resistor')).toEqual({ kind: 'rename', name: 'r1' });
   });
 });
 
@@ -150,6 +194,12 @@ describe('interval ⇄ points', () => {
   it('round-trips', () => {
     const interval = intervalFromPoints(0, 3, 300);
     expect(pointsFromInterval(0, 3, interval)).toBe(300);
+  });
+  it('patches the analysis fields the Execution settings ncp/rtol mirror', () => {
+    const a = { type: 'dynamic', startTime: 0, stopTime: 1, interval: 0.002, useInterval: true, solver: 'CVode', tolerance: 1e-6, stepSize: 0.01 } as Parameters<typeof linkedExecutionPatch>[0];
+    expect(linkedExecutionPatch(a, 'ncp', 50)).toEqual({ interval: 0.02 });
+    expect(pointsFromInterval(0, 1, linkedExecutionPatch(a, 'ncp', 50).interval!)).toBe(50);
+    expect(linkedExecutionPatch(a, 'rtol', 1e-3)).toEqual({ tolerance: 1e-3 });
   });
   it('validates times', () => {
     expect(validateTimes(0, 1)).toBeUndefined();

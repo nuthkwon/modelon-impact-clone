@@ -507,6 +507,7 @@ html[data-theme="dark"] .details-popover.popover { border: 1px solid var(--borde
 .exec-grid .text-field { height: 32px; }
 .exec-grid .exec-check { display: flex; justify-content: flex-end; }
 .exec-grid .exec-check input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
+.exec-grid .exec-helper { grid-column: 1 / -1; font-size: 11px; color: var(--text-secondary); text-align: right; margin-top: -4px; }
 
 .multi-selection { padding: 12px 16px; color: var(--text-secondary); line-height: 1.5; }
 .multi-selection ul { margin: 6px 0 0; padding-left: 18px; }

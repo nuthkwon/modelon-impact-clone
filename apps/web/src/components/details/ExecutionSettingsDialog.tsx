@@ -1,16 +1,24 @@
 /**
  * "Execution settings" dialog opened from the ANALYSIS "Advanced" button (UI_SPEC §6.4):
  * four sections editing `analysis.advanced.*`.
+ *
+ * Two fields are mirrors of ANALYSIS fields rather than settings of their own, because the run
+ * request (`analysisToRequest`) takes `simulationOptions.ncp` from Interval/Points and
+ * `solverOptions.rtol` from Tolerance: `ncp` shows and writes "Points" (through `interval`) and
+ * `rtol` shows and writes "Tolerance".
  */
 import { Dialog } from '../common/Dialog';
-import type { ExecutionSettings } from '../../store/types';
+import { pointsOf } from '../../store';
+import type { AnalysisSettings, ExecutionSettings } from '../../store/types';
 import { NumberInput } from './fields';
+import { linkedExecutionPatch } from './helpers';
 
 export interface ExecutionSettingsDialogProps {
   open: boolean;
   onClose: () => void;
-  settings: ExecutionSettings;
-  onChange: (next: ExecutionSettings) => void;
+  /** The analysis the dialog edits: its `advanced` sections, plus `ncp` ⇄ Points and `rtol` ⇄ Tolerance. */
+  analysis: AnalysisSettings;
+  onAnalysisChange: (patch: Partial<AnalysisSettings>) => void;
 }
 
 const C_COMPILERS = ['gcc', 'clang', 'msvc'];
@@ -38,9 +46,9 @@ function Check({ id, label, checked, onChange }: { id: string; label: string; ch
   );
 }
 
-export function ExecutionSettingsDialog({ open, onClose, settings, onChange }: ExecutionSettingsDialogProps) {
-  const s = settings;
-  const patch = <K extends keyof ExecutionSettings>(section: K, values: Partial<ExecutionSettings[K]>) => onChange({ ...s, [section]: { ...s[section], ...values } });
+export function ExecutionSettingsDialog({ open, onClose, analysis, onAnalysisChange }: ExecutionSettingsDialogProps) {
+  const s = analysis.advanced;
+  const patch = <K extends keyof ExecutionSettings>(section: K, values: Partial<ExecutionSettings[K]>) => onAnalysisChange({ advanced: { ...s, [section]: { ...s[section], ...values } } });
   return (
     <Dialog
       title="Execution settings"
@@ -92,7 +100,10 @@ export function ExecutionSettingsDialog({ open, onClose, settings, onChange }: E
             <label htmlFor="exec-ncp">
               <code>ncp</code>
             </label>
-            <NumberInput id="exec-ncp" value={s.simulation.ncp} accept={(n) => Number.isInteger(n) && n >= 1} onCommit={(n) => patch('simulation', { ncp: n })} />
+            <NumberInput id="exec-ncp" value={pointsOf(analysis)} accept={(n) => Number.isInteger(n) && n >= 1} onCommit={(n) => onAnalysisChange(linkedExecutionPatch(analysis, 'ncp', n))} />
+            <div className="exec-helper" id="exec-ncp-help">
+              Same as Points in the Analysis tab
+            </div>
             <Check id="exec-dyn-diag" label="dynamic_diagnostics" checked={s.simulation.dynamic_diagnostics} onChange={(v) => patch('simulation', { dynamic_diagnostics: v })} />
             <Check id="exec-event-points" label="store_event_points" checked={s.simulation.store_event_points} onChange={(v) => patch('simulation', { store_event_points: v })} />
           </div>
@@ -103,7 +114,10 @@ export function ExecutionSettingsDialog({ open, onClose, settings, onChange }: E
             <label htmlFor="exec-rtol">
               <code>rtol</code>
             </label>
-            <NumberInput id="exec-rtol" value={s.solver.rtol} accept={(n) => n > 0} onCommit={(n) => patch('solver', { rtol: n })} />
+            <NumberInput id="exec-rtol" value={analysis.tolerance} accept={(n) => n > 0} onCommit={(n) => onAnalysisChange(linkedExecutionPatch(analysis, 'rtol', n))} />
+            <div className="exec-helper" id="exec-rtol-help">
+              Same as Tolerance in the Analysis tab
+            </div>
             <label htmlFor="exec-atol">
               <code>atol</code>
             </label>

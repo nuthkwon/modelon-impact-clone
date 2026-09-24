@@ -5,7 +5,7 @@
  */
 import type { ParameterInfo } from '@impact/core';
 import { formatNumber } from '@impact/core';
-import type { Mode } from '../../store/types';
+import type { AnalysisSettings, Mode } from '../../store/types';
 
 // ---------------------------------------------------------------------------
 // Tabs
@@ -76,26 +76,43 @@ export function fullVariableName(componentName: string | undefined, name: string
 export const ATTRIBUTE_NAMES = ['start', 'fixed', 'min', 'max', 'nominal', 'displayUnit'] as const;
 export type AttributeName = (typeof ATTRIBUTE_NAMES)[number];
 
+/** Attributes whose value is a Modelica String (`displayUnit="kOhm"`); other attributes are numeric/Boolean expressions. */
+export const STRING_ATTRIBUTES: ReadonlySet<string> = new Set(['displayUnit', 'unit', 'quantity']);
+
+const STRING_LITERAL_RE = /^"(?:[^"\\]|\\.)*"$/;
+
 /**
- * True when `p` has an attribute modifier (`R.start = 1`, …): either a sibling entry named
- * `<name>.<attr>` with a `valueText`, or an experiment modifier keyed `<fullName>.<attr>`.
+ * Text written for attribute `attr`: string-typed attributes are quoted unless the text already is
+ * a string literal (`kOhm` → `"kOhm"`, `"kOhm"` unchanged), so `R(displayUnit=kOhm)` — an unknown
+ * identifier that breaks compilation — can no longer be produced from the popover. Empty → null.
  */
-export function hasAttributeModifier(p: ParameterInfo, params: readonly ParameterInfo[], modifiers?: Record<string, string>, componentName?: string): boolean {
+export function attributeCommitText(attr: string, valueText: string | null): string | null {
+  const t = valueText?.trim() ?? '';
+  if (t === '') return null;
+  if (!STRING_ATTRIBUTES.has(attr) || STRING_LITERAL_RE.test(t)) return t;
+  return JSON.stringify(t);
+}
+
+/**
+ * True when `p` has an attribute modifier to highlight the `⋮` for: an experiment modifier keyed
+ * `<fullName>.<attr>`, or a value in `p.attributes` (core surfaces `R.start = 1` there; dotted
+ * modifiers are not parameters of their own) that differs from what the parameter's class itself
+ * declares (`declared`, the same parameter without the owner component's modifiers).
+ */
+export function hasAttributeModifier(p: ParameterInfo, modifiers?: Record<string, string>, componentName?: string, declared?: ParameterInfo): boolean {
   for (const attr of ATTRIBUTE_NAMES) {
-    const dotted = `${p.name}.${attr}`;
-    if (params.some((q) => q.name === dotted && q.valueText !== undefined && q.valueText !== '')) return true;
-    if (modifiers && modifiers[fullVariableName(componentName, dotted)] !== undefined) return true;
+    if (modifiers && modifiers[fullVariableName(componentName, `${p.name}.${attr}`)] !== undefined) return true;
+    const own = p.attributes?.[attr];
+    if (own !== undefined && own !== '' && own !== declared?.attributes?.[attr]) return true;
   }
   return false;
 }
 
-/** Current text of attribute `attr` of `p`: experiment modifier first, then a sibling `<name>.<attr>` entry. */
-export function attributeValue(p: ParameterInfo, attr: AttributeName, params: readonly ParameterInfo[], modifiers?: Record<string, string>, componentName?: string): string | undefined {
-  const dotted = `${p.name}.${attr}`;
-  const fromExperiment = modifiers?.[fullVariableName(componentName, dotted)];
+/** Current text of attribute `attr` of `p`: experiment modifier first, then the attribute modifier the core reports on the parameter. */
+export function attributeValue(p: ParameterInfo, attr: AttributeName, modifiers?: Record<string, string>, componentName?: string): string | undefined {
+  const fromExperiment = modifiers?.[fullVariableName(componentName, `${p.name}.${attr}`)];
   if (fromExperiment !== undefined) return fromExperiment;
-  const sibling = params.find((q) => q.name === dotted);
-  return sibling?.valueText ?? sibling?.defaultText;
+  return p.attributes?.[attr];
 }
 
 export interface ParameterFilter {
@@ -139,6 +156,16 @@ export function parseBooleanText(text: string | undefined): boolean | undefined 
   if (t === 'true') return true;
   if (t === 'false') return false;
   return undefined;
+}
+
+export type RenameIntent = { kind: 'none' } | { kind: 'invalid'; name: string } | { kind: 'rename'; name: string };
+
+/** What an inline header rename commits: nothing (empty or unchanged), an error for a non-identifier, or the new short name. */
+export function renameIntent(draft: string, current: string): RenameIntent {
+  const name = draft.trim();
+  if (!name || name === current) return { kind: 'none' };
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) return { kind: 'invalid', name };
+  return { kind: 'rename', name };
 }
 
 /** Short class name: last dotted segment. */
@@ -187,6 +214,16 @@ export function intervalFromPoints(start: number, stop: number, points: number):
   const n = Math.max(1, Math.round(points));
   if (!(span > 0)) return 0;
   return span / n;
+}
+
+/**
+ * Execution-settings fields that mirror ANALYSIS fields: `ncp` is "Points" and `rtol` is
+ * "Tolerance". `analysisToRequest` builds the request from `interval` and `tolerance`, so a value
+ * typed in the Advanced dialog patches those fields instead of a copy that no run would read.
+ */
+export function linkedExecutionPatch(a: AnalysisSettings, field: 'ncp' | 'rtol', n: number): Partial<AnalysisSettings> {
+  if (field === 'ncp') return { interval: intervalFromPoints(a.startTime, a.stopTime, n) };
+  return { tolerance: n };
 }
 
 /** Validation of the dynamic analysis times. */

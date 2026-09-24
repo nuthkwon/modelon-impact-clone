@@ -275,7 +275,7 @@ function AnalysisPanel({ exp }: { exp: Experiment }) {
           Advanced
         </button>
       </div>
-      <ExecutionSettingsDialog open={advancedOpen} onClose={() => setAdvancedOpen(false)} settings={a.advanced} onChange={(advanced) => update({ advanced })} />
+      <ExecutionSettingsDialog open={advancedOpen} onClose={() => setAdvancedOpen(false)} analysis={a} onAnalysisChange={update} />
     </div>
   );
 }

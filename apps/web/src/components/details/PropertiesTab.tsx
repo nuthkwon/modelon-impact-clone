@@ -14,6 +14,7 @@ import {
   ATTRIBUTE_NAMES,
   DEFAULT_DIALOG_TAB,
   VARIABLES_TAB,
+  attributeCommitText,
   attributeValue,
   filterParameters,
   fullVariableName,
@@ -52,6 +53,25 @@ function useParameters(activeClass: string, component: ComponentView | undefined
   }, [registry, registryVersion, activeClass, component]);
 }
 
+/**
+ * The parameters of the selected component's class *without* the component's modifiers, by name:
+ * the attribute values the class itself declares, so only attributes the component changes light
+ * up the `⋮`. Undefined when the active class's own parameters are shown.
+ */
+function useDeclaredParameters(component: ComponentView | undefined): Map<string, ParameterInfo> | undefined {
+  const registry = useStore((s) => s.registry);
+  const registryVersion = useStore((s) => s.registryVersion);
+  return useMemo(() => {
+    void registryVersion;
+    if (!component) return undefined;
+    try {
+      return new Map(getParameters(registry, component.className).map((p) => [p.name, p]));
+    } catch {
+      return undefined;
+    }
+  }, [registry, registryVersion, component]);
+}
+
 function useVariables(className: string): VariableInfo[] {
   const registry = useStore((s) => s.registry);
   const registryVersion = useStore((s) => s.registryVersion);
@@ -69,6 +89,7 @@ export function PropertiesTab({ activeClass, component, mode, readOnly }: Proper
   const componentName = component?.name;
   const targetClass = component?.className ?? activeClass;
   const params = useParameters(activeClass, component);
+  const declared = useDeclaredParameters(component);
   const variables = useVariables(targetClass);
 
   const applyEdit = useStore((s) => s.applyEdit);
@@ -120,11 +141,13 @@ export function PropertiesTab({ activeClass, component, mode, readOnly }: Proper
     void applyEdit({ op: 'setParameter', component: componentName, name: p.name, valueText });
   };
   const commitAttribute = (p: ParameterInfo, fullName: string, attr: AttributeName, valueText: string | null) => {
+    // String attributes (displayUnit) are quoted here: `R(displayUnit=kOhm)` would not compile.
+    const text = attributeCommitText(attr, valueText);
     if (mode === 'experiment' && exp) {
-      setModifier(exp.id, `${fullName}.${attr}`, valueText);
+      setModifier(exp.id, `${fullName}.${attr}`, text);
       return;
     }
-    void applyEdit({ op: 'setParameter', component: componentName, name: `${p.name}.${attr}`, valueText });
+    void applyEdit({ op: 'setParameter', component: componentName, name: `${p.name}.${attr}`, valueText: text });
   };
 
   const variableRows = useMemo(() => {
@@ -199,7 +222,7 @@ export function PropertiesTab({ activeClass, component, mode, readOnly }: Proper
                   <div className="details-group-body">
                     {g.params.map((p) => {
                       const fullName = fullVariableName(componentName, p.name);
-                      const attributeValues = Object.fromEntries(ATTRIBUTE_NAMES.map((a) => [a, attributeValue(p, a, params, experimentModifiers, componentName)])) as Record<AttributeName, string | undefined>;
+                      const attributeValues = Object.fromEntries(ATTRIBUTE_NAMES.map((a) => [a, attributeValue(p, a, experimentModifiers, componentName)])) as Record<AttributeName, string | undefined>;
                       return (
                         <ParameterRow
                           key={fullName}
@@ -213,7 +236,7 @@ export function PropertiesTab({ activeClass, component, mode, readOnly }: Proper
                           onSticky={() => addSticky(activeClass, { component: componentName ?? '', variable: fullName, dx: 0, dy: -14, pinned: false, editable: true })}
                           modifier={experimentModifiers?.[fullName]}
                           onCommit={(v) => commitValue(p, fullName, v)}
-                          attributesActive={hasAttributeModifier(p, params, experimentModifiers, componentName)}
+                          attributesActive={hasAttributeModifier(p, experimentModifiers, componentName, declared?.get(p.name))}
                           attributeValues={attributeValues}
                           onCommitAttribute={(attr, v) => commitAttribute(p, fullName, attr, v)}
                           showResults={chips.results}

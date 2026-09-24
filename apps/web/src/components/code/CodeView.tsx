@@ -5,6 +5,11 @@
  * - `Ctrl+S`, leaving the view or switching class saves through `saveClassSource`. On a syntax
  *   error the draft is kept (nothing saved) and the error is shown as a red gutter marker + a
  *   banner "Line N: message".
+ * - Switching class auto-saves asynchronously after `openClass()` has already cleared `codeDraft`,
+ *   so the text is stashed per class first (`drafts.ts`); a failed save keeps the stash, warns with
+ *   a banner and the draft (with its diagnostic) is restored when the class is reopened.
+ * - Keystrokes typed while a save is in flight are kept: the editor only snaps to the registry
+ *   text when its document still equals the text that was saved.
  * - Read-only library classes are shown with `EditorState.readOnly` and a banner.
  * - `useShellActions().openCodeAtLine(n)` selects/scrolls to line n.
  */
@@ -23,6 +28,7 @@ import { useShellStore } from '../shell/shellActions';
 import { CloseIcon, ErrorIcon, InfoIcon, SaveIcon } from '../icons';
 import { Tooltip } from '../common/Tooltip';
 import { modelica } from './modelica';
+import { clearDraft, draftKey, followRegistryAction, markDraftFailed, stashDraft, takeDraft } from './drafts';
 import './code.css';
 
 // ---- error line marker ----------------------------------------------------------------------
@@ -78,6 +84,8 @@ export function CodeView() {
 
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
+  /** The text of the save in flight (or just completed), so the follow-registry effect can tell typing-during-save apart from an external change. */
+  const sentRef = useRef<{ className: string; text: string } | undefined>(undefined);
   const [diagnostic, setDiagnostic] = useState<Diagnostic | undefined>(undefined);
   const [saving, setSaving] = useState(false);
 
@@ -90,25 +98,39 @@ export function CodeView() {
   }, [activeClass, registryVersion]);
   const readOnly = fileInfo?.readOnly ?? true;
 
-  const save = useCallback(async (className: string, text: string): Promise<boolean> => {
+  const save = useCallback(async (className: string, text: string, key?: string): Promise<boolean> => {
     const s = useStore.getState();
     if (s.isReadOnly(className)) return false;
+    const stashKey = key ?? draftKey(s.workspaceId, className);
     const current = s.getClassText(className);
     if (current === text) {
+      clearDraft(stashKey, text);
       if (s.codeDraft !== undefined && s.activeClass === className) s.setCodeDraft(undefined);
       setDiagnostic(undefined);
       return true;
     }
     setSaving(true);
+    sentRef.current = { className, text };
     try {
       const res = await s.saveClassSource(className, text);
-      if (useStore.getState().activeClass !== className) return res.ok;
-      if (!res.ok) {
-        setDiagnostic(res.diagnostics.find((d) => d.severity === 'error') ?? res.diagnostics[0]);
+      if (res.ok) {
+        clearDraft(stashKey, text);
+        if (useStore.getState().activeClass === className) setDiagnostic(undefined);
+        return true;
+      }
+      if (sentRef.current?.className === className && sentRef.current.text === text) sentRef.current = undefined;
+      const diag = res.diagnostics.find((d) => d.severity === 'error') ?? res.diagnostics[0];
+      const st = useStore.getState();
+      if (st.activeClass !== className) {
+        // Auto-save on leaving the class failed: the text stays stashed for the next visit (with the
+        // diagnostic), and the user is told, since the Code view of that class is no longer shown.
+        markDraftFailed(stashKey, text, diag);
+        const where = diag?.loc ? `line ${diag.loc.line}: ` : '';
+        st.pushBanner({ severity: 'warning', message: `${className} has unsaved changes that could not be saved (${where}${diag?.message ?? 'unknown error'}). Reopen the class in the Code view to fix them.`, className });
         return false;
       }
-      setDiagnostic(undefined);
-      return true;
+      setDiagnostic(diag);
+      return false;
     } finally {
       setSaving(false);
     }
@@ -119,8 +141,14 @@ export function CodeView() {
     const host = hostRef.current;
     if (!host || !activeClass) return;
     const s = useStore.getState();
-    const doc = s.codeDraft ?? s.getClassText(activeClass) ?? '';
-    setDiagnostic(undefined);
+    const key = draftKey(s.workspaceId, activeClass);
+    const classText = s.getClassText(activeClass);
+    // A draft stashed when this class was left (auto-save failed or is still running) comes back as the draft.
+    const stashed = takeDraft(key);
+    const restored = s.codeDraft === undefined && !readOnly && stashed !== undefined && stashed.text !== classText ? stashed : undefined;
+    const doc = s.codeDraft ?? restored?.text ?? classText ?? '';
+    if (restored) s.setCodeDraft(restored.text);
+    setDiagnostic(restored?.diagnostic);
 
     const extensions: Extension[] = [
       lineNumbers(),
@@ -179,7 +207,12 @@ export function CodeView() {
       const text = view.state.doc.toString();
       view.destroy();
       const st = useStore.getState();
-      if (!readOnly && st.registry.has(activeClass) && text !== st.getClassText(activeClass)) void save(activeClass, text);
+      if (!readOnly && st.registry.has(activeClass) && text !== st.getClassText(activeClass)) {
+        // Stash before the asynchronous save: `openClass()` has already dropped `codeDraft`, and a
+        // rejected save must not lose the text.
+        stashDraft(key, { text });
+        void save(activeClass, text, key);
+      }
     };
   }, [activeClass, readOnly, save]);
 
@@ -188,13 +221,19 @@ export function CodeView() {
     const view = viewRef.current;
     if (!view || !activeClass) return;
     const s = useStore.getState();
-    if (s.codeDraft !== undefined) return;
-    const text = s.getClassText(activeClass);
-    if (text === undefined) return;
-    const current = view.state.doc.toString();
-    if (current === text) return;
-    const sel = Math.min(view.state.selection.main.head, text.length);
-    view.dispatch({ changes: { from: 0, to: current.length, insert: text }, selection: { anchor: sel } });
+    const registryText = s.getClassText(activeClass);
+    const editorText = view.state.doc.toString();
+    const sent = sentRef.current;
+    const action = followRegistryAction({ codeDraft: s.codeDraft, registryText, editorText, sentText: sent?.className === activeClass ? sent.text : undefined });
+    if (s.codeDraft === undefined) sentRef.current = undefined;
+    if (action === 'none' || registryText === undefined) return;
+    if (action === 'keepDirty') {
+      // Typed while the save was in flight: the newer text stays and is the draft again.
+      s.setCodeDraft(editorText);
+      return;
+    }
+    const sel = Math.min(view.state.selection.main.head, registryText.length);
+    view.dispatch({ changes: { from: 0, to: editorText.length, insert: registryText }, selection: { anchor: sel } });
   }, [registryVersion, activeClass]);
 
   // Reflect the diagnostic in the gutter.

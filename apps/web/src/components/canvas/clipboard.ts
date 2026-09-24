@@ -48,7 +48,11 @@ export function clipboardSize(): number {
 /** Re-adds the copied components; returns the names of the created components. */
 export async function pasteComponents(applyEdit: (op: EditOperation) => Promise<EditResult | undefined>): Promise<string[]> {
   const created: string[] = [];
-  for (const entry of clipboard) {
+  const entries = clipboard;
+  // Subsequent pastes land further away. Bumped up front so that a second paste issued while this
+  // one is still awaiting its edits (Ctrl+V twice) does not land on the same spot.
+  clipboard = entries.map((e) => ({ ...e, center: pastePosition(e) }));
+  for (const entry of entries) {
     const t = entry.placement.transformation;
     const [w] = extentSize(t.extent);
     const result = await applyEdit({
@@ -64,7 +68,5 @@ export async function pasteComponents(applyEdit: (op: EditOperation) => Promise<
     created.push(name);
     for (const p of entry.parameters) await applyEdit({ op: 'setParameter', component: name, name: p.name, valueText: p.valueText });
   }
-  // Subsequent pastes land further away.
-  clipboard = clipboard.map((e) => ({ ...e, center: pastePosition(e) }));
   return created;
 }

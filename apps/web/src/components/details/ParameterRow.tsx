@@ -93,6 +93,8 @@ export function ParameterRow(props: ParameterRowProps) {
     }
   };
 
+  // Read-only / results mode still lets the attribute values be inspected (fields disabled) when there are any.
+  const attributesInspectable = attributesActive || Object.values(attributeValues).some((v) => v !== undefined);
   const cases = overridden ? modifierCaseCount(modifier) : 1;
   const valueClass = ['param-value', overridden ? 'param-value--experiment' : current === undefined || current === '' ? 'param-value--default' : ''].filter(Boolean).join(' ');
 
@@ -163,7 +165,7 @@ export function ParameterRow(props: ParameterRowProps) {
         onClick={() => setAttrsOpen((o) => !o)}
         aria-label="Attributes"
         title="Attributes (start, fixed, min, max, nominal, displayUnit)"
-        disabled={attrDisabled && !attributesActive}
+        disabled={attrDisabled && !attributesInspectable}
       >
         <Icon.MoreVert />
       </button>
@@ -267,7 +269,7 @@ function AttrField({ attr, label, value, disabled, onCommit }: { attr: Attribute
         id={id}
         className={`text-field${value ? ' attr-set' : ''}`}
         value={draft}
-        placeholder={attr === 'displayUnit' ? 'e.g. kOhm' : 'default'}
+        placeholder={attr === 'displayUnit' ? 'e.g. "kOhm"' : 'default'}
         disabled={disabled}
         onChange={(e) => setDraft(e.target.value)}
         onFocus={() => setFocused(true)}

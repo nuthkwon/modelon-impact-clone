@@ -54,13 +54,14 @@ describe('component clipboard', () => {
     expect(ops).toContainEqual({ op: 'setParameter', component: 'resistor1', name: 'R', valueText: '100' });
   });
 
-  it('offsets every further paste by another 20 units', async () => {
+  it('offsets every further paste by another 20 units, even when the pastes overlap in time', async () => {
     copyComponents(diagram, ['resistor']);
     const { ops, applyEdit } = recorder();
     await pasteComponents(applyEdit);
-    await pasteComponents(applyEdit);
+    // Ctrl+V pressed again while the first paste is still awaiting its edits.
+    await Promise.all([pasteComponents(applyEdit), pasteComponents(applyEdit)]);
     const positions = ops.filter((o) => o.op === 'addComponent').map((o) => (o as Extract<EditOperation, { op: 'addComponent' }>).position);
-    expect(positions).toEqual([[0, 20], [20, 0]]);
+    expect(positions).toEqual([[0, 20], [20, 0], [40, -20]]);
   });
 
   it('keeps the rotation and pastes rotated components relative to their visual centre', async () => {

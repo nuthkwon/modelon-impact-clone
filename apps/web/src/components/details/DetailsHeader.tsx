@@ -1,14 +1,18 @@
 /**
  * Details panel header (72px): class/component icon, editable title and class path subtitle.
+ *
+ * The title is an inline rename: click → input, `Enter`/blur confirms, `Esc` cancels. A component
+ * rename rewrites the model text (`renameComponent`); a class rename runs the same routine as the
+ * shell's Rename dialog (`renameClass`) with the typed name, and failures surface as a banner.
  */
 import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import type { ClassRestriction, ComponentView, GraphicsLayer } from '@impact/core';
 import { IconSvg } from '../graphics/GraphicsLayerSvg';
 import { Tooltip } from '../common/Tooltip';
-import { useShellActions } from '../shell/shellActions';
+import { renameClass } from '../shell/renameClass';
 import { useStore } from '../../store';
-import { shortClassName } from './helpers';
+import { renameIntent, shortClassName } from './helpers';
 
 export interface DetailsHeaderProps {
   activeClass: string;
@@ -24,10 +28,11 @@ export interface DetailsHeaderProps {
 export function DetailsHeader({ activeClass, component, selectionCount, icon, restriction, readOnly }: DetailsHeaderProps) {
   const applyEdit = useStore((s) => s.applyEdit);
   const openClass = useStore((s) => s.openClass);
-  const shell = useShellActions();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
+  /** Set once an edit has been confirmed or cancelled, so the blur that follows the input's removal does not commit again. */
+  const doneRef = useRef(false);
 
   const multi = selectionCount > 1;
   const title = multi ? `${selectionCount} components selected` : component ? component.name : shortClassName(activeClass);
@@ -46,16 +51,29 @@ export function DetailsHeader({ activeClass, component, selectionCount, icon, re
 
   const startEdit = () => {
     if (!editable) return;
+    doneRef.current = false;
     setDraft(title);
     setEditing(true);
   };
 
-  const commit = () => {
-    const name = draft.trim();
+  const cancel = () => {
+    doneRef.current = true;
     setEditing(false);
-    if (!name || name === title) return;
+  };
+
+  const commit = () => {
+    if (doneRef.current) return;
+    doneRef.current = true;
+    setEditing(false);
+    const intent = renameIntent(draft, title);
+    if (intent.kind === 'none') return;
+    const { pushBanner } = useStore.getState();
+    if (intent.kind === 'invalid') {
+      pushBanner({ severity: 'warning', message: `"${intent.name}" is not a valid Modelica identifier (letters, digits and underscores, not starting with a digit).` });
+      return;
+    }
+    const name = intent.name;
     if (component) {
-      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) return;
       const oldName = component.name;
       void applyEdit({ op: 'renameComponent', name: oldName, newName: name }).then((result) => {
         if (!result || result.diagnostics.some((d) => d.severity === 'error')) return;
@@ -64,7 +82,9 @@ export function DetailsHeader({ activeClass, component, selectionCount, icon, re
         if (selection.includes(oldName)) select(selection.map((n) => (n === oldName ? name : n)), selectedConnection);
       });
     } else {
-      shell.openRename({ kind: 'class', name: activeClass });
+      void renameClass(activeClass, name).then((res) => {
+        if (!res.ok) pushBanner({ severity: 'error', message: `Could not rename ${activeClass} to ${name}: ${res.error ?? 'unknown error'}`, className: activeClass });
+      });
     }
   };
 
@@ -74,7 +94,7 @@ export function DetailsHeader({ activeClass, component, selectionCount, icon, re
       commit();
     } else if (e.key === 'Escape') {
       e.preventDefault();
-      setEditing(false);
+      cancel();
     }
     e.stopPropagation();
   };
@@ -107,7 +127,7 @@ export function DetailsHeader({ activeClass, component, selectionCount, icon, re
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={onKeyDown}
-            onBlur={() => setEditing(false)}
+            onBlur={commit}
             aria-label={component ? 'Component name' : 'Class name'}
             spellCheck={false}
           />
