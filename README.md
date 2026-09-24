@@ -28,7 +28,7 @@ Modelica 텍스트가 유일한 원본(source of truth)이고, 다이어그램 �
 | **컴파일러** | Modelica 3.x 서브셋 파서/프린터, 상속·수정자·연결 확장·파라미터 평가·균형 검사, 알리아스 제거·변수 전파·더미 미분 인덱스 축소 |
 | **솔버** | CVode(가변 스텝 BDF), Radau5ODE(음함수 사다리꼴), ExplicitEuler, 이벤트(`when`/`reinit`/`sample`) 처리 |
 | **라이브러리** | Modelica Standard Library 4.0 서브셋(Blocks, Electrical.Analog, Mechanics.Rotational/Translational, Thermal.HeatTransfer, Units, Constants, Icons — 실제 MSL 아이콘/방정식 사용, BSD-3) + 예제 10종 |
-| **서버 / API** | Express 5, Impact 공개 REST API 형태(workspaces, projects, model-executables, experiments, cases, trajectories, custom-functions)를 그대로 미러링 |
+| **서버 / API** | Express 5, Impact 공개 REST API 형태(workspaces, projects, model-executables, experiments, cases, trajectories, custom-functions)를 그대로 미러링. 시뮬레이션은 worker thread에서 실행되어 취소 가능하고 서버가 응답성을 유지함 |
 
 ## 실행 방법
 
@@ -53,9 +53,10 @@ npm start            # 서버가 apps/web/dist를 정적 서빙 (http://localhos
 테스트 / 타입 검사:
 
 ```bash
-npm test             # vitest (core, server, web 단위 테스트)
+npm test             # vitest 단위 테스트 (core · server · web, 800+ tests)
 npm run typecheck
-node apps/web/e2e/smoke.mjs   # Playwright 스모크(서버+웹 기동, 시뮬레이션, 스크린샷)
+npm run test:e2e     # Playwright E2E (서버·웹을 자체 기동, 19 tests)
+node apps/web/e2e/smoke.mjs   # 스모크: 서버+웹 기동 → 시뮬레이션 → 스크린샷
 ```
 
 ## 저장소 구조
