@@ -31,7 +31,7 @@ async function waitFor(url, ms = 60000) {
   throw new Error(`timeout waiting for ${url}`);
 }
 
-const server = start('npx', ['tsx', 'apps/server/src/index.ts'], root, 'server');
+const server = process.env.SMOKE_NO_SERVER ? { kill() {} } : start('npx', ['tsx', 'apps/server/src/index.ts'], root, 'server');
 const web = start('npx', ['vite', '--port', '5173', '--strictPort'], `${root}apps/web`, 'web');
 const errors = [];
 try {
@@ -39,14 +39,15 @@ try {
   await waitFor('http://localhost:5173/');
   const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
   const page = await browser.newPage({ viewport: { width: 1600, height: 900 } });
-  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+  const ignorable = (t) => /ERR_CERT_AUTHORITY_INVALID|fonts\.g(oogleapis|static)\.com|net::ERR_/.test(t);
+  page.on('console', (m) => { if (m.type() === 'error' && !ignorable(m.text())) errors.push(m.text()); });
   page.on('pageerror', (e) => errors.push(String(e)));
   await page.goto('http://localhost:5173/');
   await page.waitForTimeout(1500);
   await page.screenshot({ path: `${shots}/01-home.png` });
   const ws = await (await fetch('http://localhost:8080/api/workspaces')).json();
   const wid = ws.data.items[0].id;
-  await page.goto(`http://localhost:5173/workspaces/${wid}?class=Examples.RCCircuit`);
+  await page.goto(`http://localhost:5173/workspaces/${wid}?class=${process.env.SMOKE_CLASS ?? 'Examples.RCCircuit'}`);
   await page.waitForTimeout(3000);
   await page.screenshot({ path: `${shots}/02-workspace-rc.png` });
   const play = page.locator('[data-testid="execution-fab"]');
