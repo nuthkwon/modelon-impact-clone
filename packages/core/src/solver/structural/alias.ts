@@ -18,7 +18,7 @@
 import { ModelicaError } from '../../ast.js';
 import type { FlatEquation, FlatVariable, VariableAttributes } from '../../flat.js';
 import { refName } from '../../flatten/evaluate.js';
-import { equationLinearForm, substituteAliases, type Replacement } from './expr.js';
+import { equationLinearForm, startNumber, substituteAliases, type Replacement } from './expr.js';
 import { trivialEquationError, type WorkingModel } from './model.js';
 
 /** `x = scale * rep + offset`. */
@@ -46,14 +46,18 @@ function isRelative(name: string): boolean {
   return /_rel(\.|$)/.test(name);
 }
 
-/** Preference key of a variable as class representative (lexicographically smaller wins). */
+/**
+ * Preference key of a variable as class representative (lexicographically smaller wins).
+ * `fixed=true` counts with or without an explicit start (the Modelica default start, 0, is
+ * then the fixed initial value).
+ */
 export function representativeKey(v: FlatVariable, wm: WorkingModel): (number | string)[] {
   const a = v.attributes;
   return [
     wm.reinitTargets.has(v.name) ? 0 : 1,
     wm.states.has(v.name) ? 0 : 1,
     STATE_SELECT_RANK[a.stateSelect ?? 'default'] ?? 2,
-    a.fixed === true && a.start !== undefined ? 0 : 1,
+    a.fixed === true ? 0 : 1,
     isRelative(v.name) ? 1 : 0,
     a.start !== undefined ? 0 : 1,
     v.name.length,
@@ -163,6 +167,14 @@ interface Node {
   offset: number;
 }
 
+type UnionResult =
+  | { kind: 'merged' }
+  | { kind: 'redundant' }
+  /** The relation contradicts one already implied: `a - (k b + c)` evaluates to `residual` != 0. */
+  | { kind: 'inconsistent'; residual: number }
+  /** The relation forces the class root to a constant value. */
+  | { kind: 'forced'; root: string; value: number };
+
 class AffineUnionFind {
   private readonly nodes = new Map<string, Node>();
 
@@ -191,10 +203,12 @@ class AffineUnionFind {
 
   /**
    * Records `a = k * b + c`. Returns 'merged' when two classes were joined, 'redundant' if the
-   * relation was already implied, or the constant value the class root is forced to when the
-   * relation contradicts the existing transform (the class collapses to a constant).
+   * relation was already implied, 'inconsistent' (with the residual `a - (k b + c)` the
+   * existing transforms leave) if it contradicts an implied relation with the same scale, or
+   * the constant value the class root is forced to when the relation contradicts the existing
+   * transform with a different scale (the class collapses to a constant).
    */
-  union(a: string, b: string, k: number, c: number): 'merged' | 'redundant' | { root: string; value: number } {
+  union(a: string, b: string, k: number, c: number): UnionResult {
     const ra = this.find(a);
     const rb = this.find(b);
     if (ra.root === rb.root) {
@@ -203,16 +217,18 @@ class AffineUnionFind {
       const rhs = k * rb.offset + c - ra.offset;
       const scaleRef = Math.abs(ra.scale) + Math.abs(k * rb.scale);
       if (Math.abs(coef) <= 1e-12 * scaleRef) {
-        return 'redundant';
+        // The relation does not constrain the root: it reduces to 0 = rhs.
+        const offsetRef = Math.abs(k * rb.offset) + Math.abs(c) + Math.abs(ra.offset);
+        return Math.abs(rhs) <= 1e-9 * offsetRef ? { kind: 'redundant' } : { kind: 'inconsistent', residual: -rhs };
       }
-      return { root: ra.root, value: rhs / coef };
+      return { kind: 'forced', root: ra.root, value: rhs / coef };
     }
     // a = sa*ra + oa = k*(sb*rb + ob) + c  ->  ra = (k sb / sa) rb + (k ob + c - oa)/sa
     const node = this.nodes.get(ra.root)!;
     node.parent = rb.root;
     node.scale = (k * rb.scale) / ra.scale;
     node.offset = (k * rb.offset + c - ra.offset) / ra.scale;
-    return 'merged';
+    return { kind: 'merged' };
   }
 
   members(): string[] {
@@ -239,11 +255,18 @@ export function eliminateAliases(wm: WorkingModel, aliases: AliasMap): number {
   for (const al of detected) {
     if (dropped.has(al.equation)) continue;
     const res = uf.union(al.a, al.b, al.scale, al.offset);
-    if (res === 'redundant') {
+    if (res.kind === 'redundant') {
       throw trivialEquationError(wm.flat.equations[al.equation], 0, wm.flat.className);
     }
+    if (res.kind === 'inconsistent') {
+      // left - right = k_a * (a - (scale b + offset)): report the constant the equation itself reduces to.
+      const eq = wm.flat.equations[al.equation];
+      const lf = equationLinearForm(eq.left, eq.right, wm.env, wm.isRealUnknown);
+      const kA = lf?.coeffs.get(al.a) ?? 1;
+      throw trivialEquationError(eq, kA * res.residual, wm.flat.className);
+    }
     dropped.add(al.equation);
-    if (res !== 'merged') forced.set(res.root, res.value);
+    if (res.kind === 'forced') forced.set(res.root, res.value);
   }
 
   // Classes and representatives.
@@ -323,18 +346,25 @@ export function eliminateAliases(wm: WorkingModel, aliases: AliasMap): number {
   return eliminated;
 }
 
-/** Merges the attributes of `x` (eliminated, `x = scale*rep + offset`) into `rep`. */
+/**
+ * Merges the attributes of `x` (eliminated, `x = scale*rep + offset`) into `rep`. A
+ * `fixed=true` variable without an explicit start has the fixed initial value 0 (the Modelica
+ * default start), and an explicit `fixed=false` is kept when the representative says nothing.
+ */
 function mergeAttributes(wm: WorkingModel, x: FlatVariable, rep: FlatVariable, scale: number, offset: number): void {
   const a = x.attributes;
   const r = rep.attributes;
   if (x.type !== 'Real') {
     if (r.start === undefined && a.start !== undefined) r.start = a.start;
-    if (a.fixed === true && r.fixed === undefined) r.fixed = true;
+    if (a.fixed !== undefined && r.fixed === undefined) r.fixed = a.fixed;
     return;
   }
   const toRep = (v: number): number => (v - offset) / scale;
-  const xStart = typeof a.start === 'number' ? a.start : undefined;
-  const rStart = typeof r.start === 'number' ? r.start : undefined;
+  const effectiveStart = (attrs: VariableAttributes): number | undefined =>
+    attrs.fixed === true ? startNumber(attrs.start) : typeof attrs.start === 'number' ? attrs.start : undefined;
+  const xStart = effectiveStart(a);
+  const rStart = effectiveStart(r);
+  if (a.fixed === false && r.fixed === undefined) r.fixed = false;
   if (a.fixed === true && xStart !== undefined) {
     if (r.fixed === true && rStart !== undefined) {
       const expected = scale * rStart + offset;

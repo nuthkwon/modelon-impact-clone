@@ -192,6 +192,24 @@ describe('index reduction: mechanical constraint phi_rel = phi_b - phi_a (index 
     expect(getTrajectory(res, 'phi_b')!.values[0]).toBeCloseTo(0.5, 9);
     expect(getTrajectory(res, 'phi_rel')!.values[0]).toBeCloseTo(0.5 - getTrajectory(res, 'phi_a')!.values[0], 9);
   });
+
+  it('keeps the fixed initial value 0 of a demoted state whose fixed=true has no explicit start', () => {
+    // phi_b(fixed=true) without start means phi_b(0) = 0 (Modelica default start). With phi_a(0) = 1 fixed and
+    // the compliant element preferred as state, an inertia is demoted; the constraint then gives phi_rel(0) = -1.
+    const flat = constrained();
+    const byName = new Map(flat.variables.map((v) => [v.name, v]));
+    byName.get('phi_a')!.attributes = { start: 1, fixed: true };
+    byName.get('w_a')!.attributes = { start: 0, fixed: true };
+    byName.get('phi_b')!.attributes = { fixed: true };
+    byName.get('w_b')!.attributes = { start: 0 };
+    byName.get('phi_rel')!.attributes = { start: 0, stateSelect: 'prefer' };
+    byName.get('w_rel')!.attributes = { start: 0, stateSelect: 'prefer' };
+    const res = simulate(flat, opts);
+    expect(res.stats.dummyStates!.length).toBe(2);
+    expect(getTrajectory(res, 'phi_a')!.values[0]).toBeCloseTo(1, 9);
+    expect(getTrajectory(res, 'phi_b')!.values[0]).toBeCloseTo(0, 9);
+    expect(getTrajectory(res, 'phi_rel')!.values[0]).toBeCloseTo(-1, 9);
+  });
 });
 
 describe('index reduction: pendulum in Cartesian coordinates (index 3)', () => {

@@ -5,7 +5,7 @@
  */
 import type { Expr } from '../../ast.js';
 import type { FlatModel } from '../../flat.js';
-import { incidence } from './expr.js';
+import { incidence, type IncidenceOptions } from './expr.js';
 
 // -------------------------------------------------------------------------------------------
 // Maximum matching
@@ -223,18 +223,19 @@ export function analyzeStructure(flat: FlatModel, isUnknown: (name: string) => b
 
 /**
  * Incidence columns of one expression pair against an explicit column map (order 0 or 1
- * symbols). With `conditions`, variables inside relations/if-conditions are included (block
- * dependencies rather than solvability).
+ * symbols). With `conditions` (a Boolean, or full `IncidenceOptions`), variables inside
+ * relations/if-conditions are included (block dependencies rather than solvability).
  */
 export function incidenceColumns(
   left: Expr,
   right: Expr,
   isUnknown: (name: string) => boolean,
   column: (base: string, order: number) => number | undefined,
-  conditions = false,
+  conditions: boolean | IncidenceOptions = false,
 ): number[] {
-  const inc = incidence(left, isUnknown, new Map(), { conditions });
-  incidence(right, isUnknown, inc, { conditions });
+  const options: IncidenceOptions = typeof conditions === 'boolean' ? { conditions } : conditions;
+  const inc = incidence(left, isUnknown, new Map(), options);
+  incidence(right, isUnknown, inc, options);
   const cols = new Set<number>();
   for (const [base, order] of inc) {
     for (let o = 0; o <= order; o++) {

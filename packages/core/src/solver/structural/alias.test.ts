@@ -184,9 +184,60 @@ describe('alias elimination', () => {
     expect(x.attributes.nominal).toBe(100);
   });
 
+  it('treats fixed=true without an explicit start as the fixed start value 0 and keeps an explicit fixed=false', () => {
+    // Algebraic x(fixed=true) is an alias of the state y(start=1): the class is fixed at 0.
+    const fixedNoStart = M.model('T', [M.variable('y', { start: 1 }), M.variable('x', { fixed: true })], [M.eq(M.der('y'), E.neg(M.r('y'))), M.eq(M.r('x'), M.r('y'))]);
+    const wm = working(fixedNoStart);
+    eliminateAliases(wm, new Map());
+    expect(wm.flat.variables.map((v) => v.name)).toEqual(['y']);
+    expect(wm.flat.variables[0].attributes).toMatchObject({ start: 0, fixed: true });
+
+    // Two states: the fixed one (implicit start 0) is preferred as representative over an explicit start.
+    const twoStates = M.model(
+      'T',
+      [M.variable('y', { start: 1 }), M.variable('x', { fixed: true })],
+      [M.eq(M.r('x'), M.r('y')), M.eq(M.der('x'), M.n(0)), M.eq(M.der('y'), M.n(0))],
+    );
+    const wm2 = working(twoStates);
+    eliminateAliases(wm2, new Map());
+    expect(wm2.flat.variables.map((v) => v.name)).toEqual(['x']);
+    expect(wm2.flat.variables[0].attributes.fixed).toBe(true);
+
+    // The implicit fixed start 0 conflicts with an explicit fixed start of the alias.
+    const conflict = M.model(
+      'T',
+      [M.variable('x', { fixed: true }), M.variable('y', { start: 2, fixed: true })],
+      [M.eq(M.r('x'), M.r('y')), M.eq(M.der('x'), M.n(0)), M.eq(M.der('y'), M.n(0))],
+    );
+    expect(() => eliminateAliases(working(conflict), new Map())).toThrow(/Conflicting start values: 'x' \(start=0, fixed=true\)/);
+
+    // An explicit fixed=false of the eliminated variable reaches a representative without fixed.
+    const notFixed = M.model('T', [M.variable('b', { start: 1 }), M.variable('a', { fixed: false })], [M.eq(M.der('b'), E.neg(M.r('b'))), M.eq(M.r('a'), M.r('b'))]);
+    const wm3 = working(notFixed);
+    eliminateAliases(wm3, new Map());
+    expect(wm3.flat.variables[0].attributes).toMatchObject({ start: 1, fixed: false });
+  });
+
   it('throws for redundant equations that reduce to 0 = 0', () => {
     const flat = M.model('T', [M.variable('x'), M.variable('y')], [M.eq(M.add(M.r('x'), M.r('y')), M.n(1)), M.eq(M.mul(M.n(2), M.add(M.r('x'), M.r('y'))), M.n(2))]);
     expect(() => simulate(flat, opts)).toThrow(/structurally singular[\s\S]*redundant/);
+  });
+
+  it('reports a contradictory alias pair as an inconsistent model, not as a redundant equation', () => {
+    const flat = M.model(
+      'T',
+      [M.variable('a'), M.variable('b'), M.variable('c')],
+      [M.eq(M.r('a'), M.r('b'), 'a=b'), M.eq(M.r('a'), M.add(M.r('b'), M.n(1)), 'a=b+1'), M.eq(M.r('c'), M.time)],
+    );
+    expect(() => simulate(flat, opts)).toThrow(ModelicaError);
+    expect(() => simulate(flat, opts)).toThrow(/The model is inconsistent: equation 'a = b \+ 1' \[a=b\+1\] reduces to 0 = -1/);
+    // A chain of offsets that is consistent up to round-off is redundant (0 = 0), not inconsistent.
+    const chain = M.model(
+      'T',
+      [M.variable('a'), M.variable('b'), M.variable('c')],
+      [M.eq(M.r('a'), M.add(M.r('b'), M.n(0.1))), M.eq(M.r('b'), M.add(M.r('c'), M.n(0.2))), M.eq(M.r('a'), M.add(M.r('c'), M.n(0.3)))],
+    );
+    expect(() => simulate(chain, opts)).toThrow(/structurally singular[\s\S]*redundant/);
   });
 });
 
@@ -239,6 +290,35 @@ describe('alias elimination through simulate()', () => {
     // The reinit target v2 is the representative of its class; the original state v keeps its derivative.
     expect(res.trajectories.map((t) => t.name)).toContain('der(v)');
     expect(getTrajectory(res, 'der(v)')!.kind).toBe('derivative');
+  });
+
+  it('a state with fixed=true but no explicit start keeps its fixed initial value 0 through an alias', () => {
+    // der(x) = v, der(y) = w, x = y, der(v) = -x with x(fixed=true) [start 0] and y(start=1): x = y = cos(t)*0 = 0 ... the class starts at 0.
+    const flat = M.model(
+      'T',
+      [M.variable('x', { fixed: true }), M.variable('y', { start: 1 }), M.variable('v', { start: 0, fixed: true }), M.variable('w')],
+      [M.eq(M.der('x'), M.r('v')), M.eq(M.der('y'), M.r('w')), M.eq(M.r('x'), M.r('y')), M.eq(M.der('v'), E.neg(M.r('x')))],
+    );
+    const res = simulate(flat, opts);
+    expect(res.stats.aliasEliminated).toBe(2);
+    expect(getTrajectory(res, 'x')!.values[0]).toBe(0);
+    expect(getTrajectory(res, 'y')!.values[0]).toBe(0);
+    for (const value of getTrajectory(res, 'x')!.values) expect(Math.abs(value)).toBeLessThan(1e-9);
+  });
+
+  it('an explicit fixed=false of an eliminated variable decides which state the initial equations free', () => {
+    // z(start=3) and b(start=1) are states; a(fixed=false) = b. `initial equation z + a = 3` can free either state:
+    // the fixed=false of a (now of b) must win over z, which appears first in the equation.
+    const flat = M.model(
+      'T',
+      [M.variable('z', { start: 3 }), M.variable('a', { fixed: false }), M.variable('b', { start: 1 })],
+      [M.eq(M.der('z'), E.neg(M.r('z'))), M.eq(M.der('b'), E.neg(M.r('b'))), M.eq(M.r('a'), M.r('b'))],
+      { initialEquations: [M.eq(M.add(M.r('z'), M.r('a')), M.n(3), 'init', 'initial')] },
+    );
+    const res = simulate(flat, opts);
+    expect(getTrajectory(res, 'z')!.values[0]).toBeCloseTo(3, 9);
+    expect(getTrajectory(res, 'b')!.values[0]).toBeCloseTo(0, 9);
+    expect(getTrajectory(res, 'a')!.values[0]).toBeCloseTo(0, 9);
   });
 
   it('aliases of two states through a gear ratio (scaled alias) need no index reduction', () => {

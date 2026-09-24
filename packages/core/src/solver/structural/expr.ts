@@ -157,16 +157,24 @@ export interface IncidenceOptions {
    * ordering blocks (the condition must be known before the equation is solved).
    */
   conditions?: boolean;
+  /**
+   * Variables whose `pre(x)` reads the current value of `x` rather than a remembered one, so
+   * that `pre(x)` counts as an occurrence of `x`. At initialisation `pre(x) = x` for every
+   * continuous Real variable (compile.ts maps such a `pre(x)` to the current value), which
+   * makes `x` a dependency of the block order. Default: `pre()` is opaque.
+   */
+  preIsCurrent?: (name: string) => boolean;
 }
 
 /**
  * Structural incidence of an expression: every unknown (as decided by `isUnknown`) with the
  * highest derivative order it appears at. Variables inside `pre()`/`edge()`/`change()` are
- * never counted; variables inside relations (`a < b`, if-conditions) only with
- * `options.conditions`.
+ * never counted (except `pre(x)` for `options.preIsCurrent(x)`); variables inside relations
+ * (`a < b`, if-conditions) only with `options.conditions`.
  */
 export function incidence(e: Expr, isUnknown: (name: string) => boolean, out: Map<string, number> = new Map(), options: IncidenceOptions = {}): Map<string, number> {
   const conditions = options.conditions === true;
+  const preIsCurrent = options.preIsCurrent;
   const note = (base: string, order: number): void => {
     if (!isUnknown(base)) return;
     const prev = out.get(base);
@@ -184,6 +192,10 @@ export function incidence(e: Expr, isUnknown: (name: string) => boolean, out: Ma
             note(s.base, s.order);
             return;
           }
+        }
+        if (x.callee === 'pre' && preIsCurrent && x.args.length === 1 && x.args[0].kind === 'ref' && preIsCurrent(refName(x.args[0]))) {
+          visit(x.args[0]);
+          return;
         }
         if (OPAQUE_CALLS.has(x.callee)) return;
         x.args.forEach(visit);

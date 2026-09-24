@@ -222,7 +222,8 @@ export function reduceIndex(wm: WorkingModel, options: IndexReductionOptions = {
       if (originalMaxOrder.get(x)! >= 1) {
         result.dummyStates.push(x);
         result.messages.push(`Selected dummy derivative for ${x}`);
-        if (v.attributes.fixed === true && v.attributes.start !== undefined) {
+        // A fixed start without an explicit value is the Modelica default start (0).
+        if (v.attributes.fixed === true) {
           fixedInitial.push({
             kind: 'initial',
             left: flatRef(x),
@@ -381,7 +382,7 @@ function buildPreference(wm: WorkingModel, eqs: EqInfo[]): (s: DerivativeSymbol)
     let isRel = 0;
     for (const m of members) {
       const v = wm.byName.get(m)!;
-      if (v.attributes.fixed === true && v.attributes.start !== undefined) hasFixed = 1;
+      if (v.attributes.fixed === true) hasFixed = 1;
       if (/_rel(\.|$)/.test(m)) isRel = 1;
     }
     k = [stateSelect, hasFixed, isRel ? 0 : 1];

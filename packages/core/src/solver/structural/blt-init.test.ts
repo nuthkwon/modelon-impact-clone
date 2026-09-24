@@ -121,4 +121,29 @@ describe('block-wise initialisation', () => {
     }
     expect(res.stats.events).toBeGreaterThanOrEqual(1);
   });
+
+  it('orders blocks by pre() of continuous variables (pre(x) = x at initialisation)', () => {
+    // y = pre(x) + 1 must be solved after x = sin(time) + 2, otherwise y(0) is computed from the start value of x.
+    const flat = M.model('T', [M.variable('y'), M.variable('x')], [M.eq(M.r('y'), M.add(M.pre('x'), M.n(1))), M.eq(M.r('x'), M.add(E.call('sin', [M.time]), M.n(2)))]);
+    const res = simulate(flat, opts);
+    expect(res.log.some((l) => /block-wise solve failed/.test(l.message))).toBe(false);
+    const x = getTrajectory(res, 'x')!.values;
+    const y = getTrajectory(res, 'y')!.values;
+    expect(x[0]).toBeCloseTo(2, 12);
+    expect(y[0]).toBeCloseTo(3, 12);
+    for (let k = 0; k < res.time.length; k++) expect(y[k]).toBeCloseTo(x[k] + 1, 9);
+  });
+
+  it('falls back to the simultaneous solve when an equation changes after its block was solved (hidden dependency)', () => {
+    // edge(b) reads the current value of b but is structurally opaque: y = if edge(b) ... may be ordered before b.
+    const flat = M.model(
+      'T',
+      [M.variable('y'), M.variable('b', { type: 'Boolean', variability: 'discrete', start: false })],
+      [M.eq(M.r('y'), M.ifExpr(E.call('edge', [M.r('b')]), M.n(1), M.n(0))), M.eq(M.r('b'), M.gt(M.time, M.n(-1)))],
+    );
+    const res = simulate(flat, opts);
+    expect(res.log.some((l) => /block-wise solve failed \(equation 'y = if edge\(b\) then 1 else 0 \[Test\]' changed after its block was solved/.test(l.message))).toBe(true);
+    expect(getTrajectory(res, 'b')!.values[0]).toBe(1);
+    expect(getTrajectory(res, 'y')!.values[0]).toBe(1);
+  });
 });

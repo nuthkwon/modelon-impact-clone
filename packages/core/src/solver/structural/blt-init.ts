@@ -52,16 +52,24 @@ export function analyzeInitialization(m: CompiledModel, free: UnknownInfo[]): In
     return undefined;
   };
   const isUnknown = (name: string): boolean => m.index.has(name);
+  // At initialisation `pre(x)` of a continuous Real variable is the current value of x
+  // (compile.ts), so such an x must be solved before the equations that read pre(x).
+  const preIsCurrent = (name: string): boolean => {
+    const idx = m.index.get(name);
+    if (idx === undefined) return false;
+    const u = m.unknowns[idx];
+    return u.kind !== 'discrete' && u.type === 'Real';
+  };
   const adjacency: number[][] = [];
   const dependencies: number[][] = [];
   for (const eq of [...m.flat.equations, ...m.flat.initialEquations]) {
     adjacency.push(incidenceColumns(eq.left, eq.right, isUnknown, column));
-    dependencies.push(incidenceColumns(eq.left, eq.right, isUnknown, column, true));
+    dependencies.push(incidenceColumns(eq.left, eq.right, isUnknown, column, { conditions: true, preIsCurrent }));
   }
   const matching = maximumMatching(nEq, n, adjacency);
   if (matching.size !== n) return undefined;
   // Blocks are ordered by all dependencies, including variables that only appear in
-  // if-conditions/relations (they must be known before the block is solved).
+  // if-conditions/relations or inside pre() (they must be known before the block is solved).
   const blocks = bltSort(nEq, dependencies, matching);
   return { n, blocks, maxBlock: blocks.reduce((mx, b) => Math.max(mx, b.equations.length), 0) };
 }
@@ -98,6 +106,10 @@ export function solveInitializationBlockwise(sys: System, blt: InitializationBlt
   };
   const residualAt = (i: number): number => (i < nEq ? m.residuals[i].fn(ctx) : m.initialResiduals[i - nEq].fn(ctx));
   const describe = (b: BltBlock): string => b.equations.map((i) => `'${sys.equationName(i)}'`).join(', ');
+  // Residual of every equation right after its block was solved. Later blocks must not change
+  // it: if one does, the equation depends on a variable the structural analysis did not see
+  // (e.g. `edge(b)` reads the current value of b) and the block order is not valid.
+  const settled = new Float64Array(n);
 
   for (const block of blt.blocks) {
     const size = block.equations.length;
@@ -113,6 +125,7 @@ export function solveInitializationBlockwise(sys: System, blt: InitializationBlt
       if (!r.converged) {
         return failure(problem, z, full, iterations, jacobians, `equation ${describe(block)} could not be solved for '${unknownName(sys, freeStates, j)}'`);
       }
+      settled[i] = residualAt(i);
       continue;
     }
     const vars = block.variables;
@@ -145,10 +158,16 @@ export function solveInitializationBlockwise(sys: System, blt: InitializationBlt
     if (!res.converged) {
       return failure(problem, z, full, iterations, jacobians, `the ${size}x${size} block ${describe(block)} did not converge (${res.reason})`);
     }
+    for (const i of block.equations) settled[i] = residualAt(i);
   }
   problem.residual(z, full);
   for (let i = 0; i < n; i++) {
     if (!Number.isFinite(full[i])) return failure(problem, z, full, iterations, jacobians, `equation '${sys.equationName(i)}' is not finite`);
+    // Every input of a solved equation is fixed by its own or an earlier block, so re-evaluating
+    // it with the final values must reproduce the settled residual exactly.
+    if (full[i] !== settled[i]) {
+      return failure(problem, z, full, iterations, jacobians, `equation '${sys.equationName(i)}' changed after its block was solved (it depends on a variable solved later)`);
+    }
   }
   return { converged: true, iterations, jacobians, stepNorm: 0, residual: full, worstEquation: worstIndex(full) };
 }
