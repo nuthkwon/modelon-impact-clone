@@ -306,7 +306,10 @@ export class JobRunner {
       lines.push(`Number of Jacobian evaluations: ${s.jacobianEvaluations}`);
       lines.push(`Number of events: ${s.events}`);
       lines.push(`Result: ${result.time.length} time points, ${result.trajectories.length} variables`);
-      c.run_info.statistics = { ...s };
+      c.run_info.statistics = Object.fromEntries(Object.entries(s).filter(([, v]) => typeof v === 'number' || typeof v === 'boolean')) as Record<string, number | boolean>;
+      if (s.aliasEliminated !== undefined || s.propagated !== undefined || s.dummyStates?.length) {
+        lines.push(`Structural analysis: ${s.aliasEliminated ?? 0} alias variables eliminated, ${s.propagated ?? 0} variables propagated, ${s.dummyStates?.length ?? 0} dummy derivatives selected${s.dummyStates?.length ? ` (${s.dummyStates.join(', ')})` : ''}`);
+      }
       if (job.cancelled && !s.completed) status = 'cancelled';
       lines.push(`Simulation ${status === 'successful' ? 'finished' : 'cancelled'} in ${seconds(t0)} s (solver ${s.cpuTimeMs.toFixed(0)} ms)`);
     } catch (e) {

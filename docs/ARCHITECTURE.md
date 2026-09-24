@@ -45,6 +45,7 @@ solver simulates it, and the results are plotted in the browser.
 | `flatten/` | `flatten(registry, className, opts?) : FlatModel` — instantiation, modifications, extends, connect expansion, parameter evaluation, balance check | registry, evaluate |
 | `flatten/evaluate.ts` | `evaluateConstant(expr, env)`, `Env` for constant folding | ast |
 | `solver/` | `simulate(flat, options, hooks?) : SimulationResult` — residual compiler, Newton/LU, integrators (Implicit Euler, Trapezoidal/BDF2 with step control, Explicit Euler, RK4), event handling for `when`/`reinit` | flat, simulation |
+| `solver/structural/` | `prepareModel(flat)` — alias elimination, known-variable propagation, Pantelides + dummy-derivative index reduction, BLT block initialisation | flat, evaluate |
 | `graphics/annotations.ts` | `parseGraphicsLayer(mod, 'Icon'|'Diagram')`, `parsePlacement(annotation)`, `parseConnectionLine(annotation)`, `parseExperiment(annotation)`; robust to missing/odd values | ast, graphics |
 | `graphics/serialize.ts` | inverse: `placementToModifier(p)`, `connectionLineToModifier(l)`, `graphicsLayerToModifier(layer, kind)` | ast, graphics |
 | `diagram/view.ts` | `buildDiagramView(registry, className): DiagramView` (resolves inherited icons, ports incl. `iconTransformation`, connections) | registry, graphics |
@@ -101,10 +102,37 @@ Built-in types `Real Integer Boolean String` and `enumeration` are predefined; s
 6. Count unknowns (`continuous` + `discrete` Real/Integer/Boolean non-parameter variables) and equations; unequal counts produce a `ModelicaError` listing both numbers (Impact shows "The model is not balanced: N equations, M variables").
 7. Detect states: any variable `x` appearing inside `der(x)`.
 
+### Structural pre-processing (`solver/structural/`)
+
+Before compiling residuals, `prepareModel(flat)` transforms the flat DAE so that Modelica
+models built from acausal components initialise and integrate robustly:
+
+1. **Alias elimination** — equations of the form `a = b`, `a = -b`, `a + b = 0`, `a = k*b`,
+   `a = b + c` (constants/parameters `k`, `c`) and derivative aliases (`w1 = der(phi)`,
+   `w2 = -der(phi)`) are merged with a union-find of affine transforms; start/fixed/min/max
+   attributes are merged (conflicting fixed start values are an error) and the eliminated
+   variables are reconstructed in the result trajectories.
+2. **Known-variable propagation** — equations with a single unknown that depends only on
+   parameters (`R_actual = R*(1+alpha*(T-T_ref))`) turn that unknown into a constant.
+   Steps 1–2 are iterated to a fixed point.
+3. **Index reduction** — Hopcroft–Karp matching of equations against highest-order unknowns;
+   unmatched (constraint) equations are differentiated symbolically (Pantelides) and
+   **dummy derivatives** (Mattsson–Söderlind) are selected with a numeric rank test at the
+   start point, preferring `stateSelect`, states without `fixed=true` starts and relative
+   coordinates. Demoted states become algebraic; `der(x)` of a dummy state becomes an
+   algebraic unknown. Balance is preserved.
+4. **BLT initialisation** — the initialisation system is sorted into strongly connected blocks
+   (Tarjan); 1×1 blocks are solved by safeguarded scalar Newton, larger blocks by damped Newton
+   with homotopy fallback. This is what makes bilinear terms with zero start values (`v = R*i`)
+   solvable where a simultaneous Newton has a singular Jacobian.
+
+The log reports `Structural analysis: N alias variables eliminated, M variables propagated,
+K dummy derivatives selected (…)`. `options.disableStructuralSimplification` bypasses the stage.
+
 ### Simulation
 
-`simulate(flat, options)` compiles residuals `F(t, v, dv) = 0` from the flat equations into
-closures over a `Float64Array`. Unknown vector `v` = states ∪ algebraics; `dv` = derivatives
+`simulate(flat, options)` compiles residuals `F(t, v, dv) = 0` from the (pre-processed) flat
+equations into closures over a `Float64Array`. Unknown vector `v` = states ∪ algebraics; `dv` = derivatives
 of states. Integrators:
 
 | UI name | Implementation |
