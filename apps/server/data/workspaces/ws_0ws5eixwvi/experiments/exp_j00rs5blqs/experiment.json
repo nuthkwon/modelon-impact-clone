@@ -1,5 +1,5 @@
 {
-  "id": "exp_xdsz1q9byj",
+  "id": "exp_j00rs5blqs",
   "experiment": {
     "version": 2,
     "base": {
@@ -47,12 +47,12 @@
   },
   "meta_data": {
     "label": "Result1",
-    "created_at": "2026-09-24T07:23:17.754Z"
+    "created_at": "2026-09-24T08:16:48.548Z"
   },
   "run_info": {
     "status": "done",
-    "failed": 1,
-    "successful": 0,
+    "failed": 0,
+    "successful": 1,
     "cancelled": 0,
     "not_started": 0
   },

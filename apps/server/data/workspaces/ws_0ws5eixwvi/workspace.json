@@ -2,12 +2,12 @@
   "name": "Default",
   "format": "1.0.0",
   "description": "Default workspace",
-  "createdAt": "2026-09-24T07:20:40.255Z",
-  "updatedAt": "2026-09-24T07:20:40.255Z",
+  "createdAt": "2026-09-24T08:16:41.006Z",
+  "updatedAt": "2026-09-24T08:16:41.006Z",
   "projects": [
     {
       "reference": {
-        "id": "prj_qfplxu5uyc"
+        "id": "prj_4xd1g6kwcr"
       },
       "disabled": false
     }

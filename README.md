@@ -6,6 +6,16 @@ Modelica 텍스트가 유일한 원본(source of truth)이고, 다이어그램 �
 
 > English summary at the bottom.
 
+## 화면
+
+| Model 모드 (다이어그램 편집) | Experiment 모드 (Analysis 설정) |
+| --- | --- |
+| ![Model mode](docs/screenshots/model-mode-rccircuit.png) | ![Experiment mode](docs/screenshots/experiment-mode-rccircuit.png) |
+
+| Results 모드 (플롯 · 스티키 · 타임 슬라이더 · CALCULATED VALUES) | Home 페이지 |
+| --- | --- |
+| ![Results mode](docs/screenshots/results-plot-heatedroom.png) | ![Home](docs/screenshots/home.png) |
+
 ## 주요 기능
 
 | 영역 | 내용 |

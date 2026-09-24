@@ -1,32 +1,34 @@
 {
   "id": "case_1",
-  "experiment_id": "exp_cscgmegs52",
+  "experiment_id": "exp_j00rs5blqs",
   "meta": {
     "label": "Case 1"
   },
   "run_info": {
     "status": "successful",
-    "datetime_started": "2026-09-24T07:41:13.896Z",
+    "datetime_started": "2026-09-24T08:16:48.576Z",
     "statistics": {
-      "steps": 75,
+      "steps": 288,
       "rejectedSteps": 0,
-      "newtonIterations": 4362,
-      "jacobianEvaluations": 18,
+      "newtonIterations": 2974,
+      "jacobianEvaluations": 24,
       "events": 1,
-      "cpuTimeMs": 86.21076599997468,
-      "completed": true
+      "cpuTimeMs": 45.892917999999554,
+      "completed": true,
+      "aliasEliminated": 13,
+      "propagated": 6
     },
-    "datetime_finished": "2026-09-24T07:41:13.998Z"
+    "datetime_finished": "2026-09-24T08:16:48.634Z"
   },
   "input": {
     "analysis": {
       "type": "dynamic",
       "parameters": {
         "start_time": 0,
-        "final_time": 21600
+        "final_time": 5
       },
       "simulationOptions": {
-        "ncp": 2160,
+        "ncp": 1000,
         "dynamic_diagnostics": false,
         "store_event_points": true
       },
