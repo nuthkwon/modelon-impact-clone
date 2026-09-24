@@ -97,7 +97,7 @@ Built-in types `Real Integer Boolean String` and `enumeration` are predefined; s
 1. Instantiate the class: collect its own components/equations plus those of every base class (depth-first, `extends` modifications applied). Component names are prefixed with the instance path.
 2. Merge modifications outermost-wins: component modifier > class default binding; nested `a(b(start=1))` reaches attributes.
 3. For each connector-typed component create the connector's variables (`v`, `i` …). `input/output` connectors are causal (single Real).
-4. `connect(a, b)`: group connected connectors into **connection sets** (union-find). For each set: potential variables get `n-1` equality equations; flow variables get one equation `Σ ±flow = 0` (sign `+` for inside connectors — components of the model —, `−` for outside connectors — the model's own ports). Causal connections become `a = b`. Unconnected inside flow variables get `flow = 0`.
+4. `connect(a, b)`: group connected connector **leaves** (primitive variables, so a whole-connector connect and a sub-connector connect of the same connector merge) into **connection sets** (union-find). For each set: potential variables get `n-1` equality equations; flow variables get one equation `Σ ±flow = 0` (sign `+` for inside connectors — components of the model —, `−` for outside connectors — the model's own ports). Causal connections become `a = b`. Inside flow leaves that no connect touches get `flow = 0`; the root model's own connectors get the environment equations (`flow = 0`, unbound inputs bound to their start value) so a locally balanced model stays balanced (§4.7). `elsewhen` branches are lowered to `edge()` conditions (§8.3.5) using hidden Boolean helper variables where needed.
 5. Evaluate constants and parameters (bindings may reference other parameters; cycles are diagnostics). Variables with `parameter`/`constant` variability leave the unknown set.
 6. Count unknowns (`continuous` + `discrete` Real/Integer/Boolean non-parameter variables) and equations; unequal counts produce a `ModelicaError` listing both numbers (Impact shows "The model is not balanced: N equations, M variables").
 7. Detect states: any variable `x` appearing inside `der(x)`.
@@ -142,11 +142,18 @@ of states. Integrators:
 | `Implicit Euler` | fixed-step BDF1 |
 | `Explicit Euler`, `Runge-Kutta` | fixed step; require the model to be solvable for `dv` given `v` (algebraics solved by Newton each stage) |
 
-Initialisation: solve the initial system (equations + initial equations, states fixed to
-`start` unless `fixed=false` and initial equations free them) by Newton from `start` guesses.
-Events: after each accepted step evaluate `when` conditions; on a false→true crossing apply
-`reinit` / discrete assignments and restart the integrator (order 1). Results are sampled at
-`ncp` communication points (plus event points).
+Initialisation: solve the initial system (equations + initial equations; states are fixed to
+`start` unless `fixed=false` or an initial equation determines them — the freed states are
+chosen by a bipartite matching of the initial equations, not by declaration order) by Newton
+from `start` guesses (block-wise, see the structural stage). At initialisation only
+`when initial()` clauses fire (`pre(c) = c` for every other condition).
+Events: relations, `floor/ceil/integer/div/mod/rem` and `sample()` generate zero-crossing /
+time events (relations inside `when` bodies, `noEvent()` and initial equations do not); after
+each accepted step crossings are located by bisection, `when` clauses whose condition became
+true apply their `reinit` / discrete assignments (`change(v)` is `v <> pre(v)` exactly), a time
+event coinciding with a state event is processed in the same event iteration, and the
+integrator restarts at order 1. Results are sampled at `ncp` communication points (plus
+pre/post event points).
 
 ## Text as source of truth
 

@@ -1,12 +1,12 @@
 /**
- * Event handling: zero-crossing detection on the relations collected by `compile.ts`,
+ * Event handling: zero-crossing detection on the monitored expressions collected by
+ * `compile.ts` (relations and the integer results of `floor`/`ceil`/`integer`/`div`),
  * bisection on the dense output of the last step to locate the crossing, event iteration
  * (when-clauses, `reinit`, discrete assignments, `edge`/`change`), time events from
  * `sample(start, interval)`, and dense output (Hermite interpolation of the states with the
  * algebraic variables re-solved by Newton).
  */
 import { ModelicaError } from '../ast.js';
-import { relationHolds } from './compile.js';
 import type { StepRecord } from './integrators.js';
 import type { Recorder } from './output.js';
 import { fmt, type LogFn, type System } from './system.js';
@@ -20,8 +20,8 @@ export class EventHandler {
   /** Boolean value of every when-condition at the last event (or after initialisation). */
   readonly condPrev: Uint8Array;
   private readonly condNow: Uint8Array;
-  private readonly relFresh: Uint8Array;
-  private readonly relBisect: Uint8Array;
+  private readonly relFresh: Float64Array;
+  private readonly relBisect: Float64Array;
   private readonly vTmp: Float64Array;
   private readonly dvTmp: Float64Array;
   private readonly guessV: Float64Array;
@@ -41,8 +41,8 @@ export class EventHandler {
     const nR = sys.m.relations.length;
     this.condPrev = new Uint8Array(nW);
     this.condNow = new Uint8Array(nW);
-    this.relFresh = new Uint8Array(nR);
-    this.relBisect = new Uint8Array(nR);
+    this.relFresh = new Float64Array(nR);
+    this.relBisect = new Float64Array(nR);
     this.vTmp = new Float64Array(sys.nU);
     this.dvTmp = new Float64Array(sys.nS);
     this.guessV = new Float64Array(sys.nU);
@@ -57,18 +57,15 @@ export class EventHandler {
   // Evaluation helpers
   // -----------------------------------------------------------------------------------------
 
-  /** Evaluates every relation from its operands (ignoring the frozen values) at (t, v, dv). */
-  evalRelations(t: number, v: Float64Array, dv: Float64Array, out: Uint8Array): void {
+  /** Evaluates every monitored expression from its operands (ignoring the frozen values) at (t, v, dv). */
+  evalRelations(t: number, v: Float64Array, dv: Float64Array, out: Float64Array): void {
     const sys = this.sys;
     const ctx = sys.ctx;
     sys.bind(t, v, dv);
     const frozen = ctx.frozen;
     ctx.frozen = false;
     const rels = sys.m.relations;
-    for (let i = 0; i < rels.length; i++) {
-      const r = rels[i];
-      out[i] = relationHolds(r.op, r.left(ctx), r.right(ctx)) ? 1 : 0;
-    }
+    for (let i = 0; i < rels.length; i++) out[i] = rels[i].eval(ctx);
     ctx.frozen = frozen;
   }
 
@@ -82,7 +79,7 @@ export class EventHandler {
     for (let i = 0; i < whens.length; i++) out[i] = whens[i].cond(ctx) >= 0.5 ? 1 : 0;
   }
 
-  private static differ(a: Uint8Array, b: Uint8Array): boolean {
+  private static differ(a: ArrayLike<number>, b: ArrayLike<number>): boolean {
     for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return true;
     return false;
   }
@@ -219,7 +216,9 @@ export class EventHandler {
    * Handles an event at `t`. On entry the system state (sys.t, sys.v, sys.dv) is the pre-event
    * point, consistent with the old (frozen) relation values. Records the pre- and post-event
    * points, applies fired when-clauses in order, re-solves the algebraic variables and updates
-   * the relation values, `pre` and the remembered condition values.
+   * the relation values, `pre` and the remembered condition values. `timeEvent` activates the
+   * `sample` operators due at `t`; a located state event at the same instant is processed in
+   * the same event iteration (the relation values are always refreshed here).
    */
   handleEvent(t: number, timeEvent: boolean): void {
     const sys = this.sys;
@@ -286,7 +285,8 @@ export class EventHandler {
     this.recorder.record(t, sys.v, sys.dv);
     sys.stats.events++;
     if (sys.options.dynamicDiagnostics) {
-      this.log('debug', `${timeEvent ? 'Time' : 'State'} event at t=${fmt(t)}${fired.length ? `: ${fired.join('; ')}` : ''}`);
+      const kind = timeEvent ? (relationChanged ? 'Time and state' : 'Time') : 'State';
+      this.log('debug', `${kind} event at t=${fmt(t)}${fired.length ? `: ${fired.join('; ')}` : ''}`);
     }
   }
 

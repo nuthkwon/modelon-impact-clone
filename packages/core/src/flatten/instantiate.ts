@@ -354,32 +354,22 @@ function populate(ctx: Ctx, inst: ClassInstance, incoming: ModEntry): void {
   const typed = elements.map((el) => ({ ...el, type: resolveComponentType(ctx, el.decl, el.declaredIn, inst.path ? `${inst.path}.${el.decl.name}` : el.decl.name) }));
   inst.order = typed.map((el) => el.decl.name);
 
-  // Pass 1: unconditional leaf variables; pass 2: conditional leaves; pass 3: unconditional
-  // class-typed components; pass 4: conditional class-typed components. Declaration order is
+  // Unconditional components first (pass 1: leaf variables, pass 2: class-typed components),
+  // then the conditional ones (pass 3: leaves, pass 4: class-typed). Declaration order is
   // irrelevant in Modelica, so a condition may refer to parameters of any unconditional
-  // component (`Gain g2 if g1.k > 0; Gain g1(k=1);`).
-  for (const el of typed) {
-    if (isLeafType(el.type) && !el.decl.condition) inst.components.set(el.decl.name, createVariable(ctx, inst, el.decl, el.declaredIn, el.type, el.mods));
-  }
-  for (const el of typed) {
-    if (isLeafType(el.type) && el.decl.condition) {
-      if (!evaluateCondition(ctx, inst, el.decl, el.declaredIn)) {
-        inst.disabled.add(el.decl.name);
-        continue;
-      }
-      inst.components.set(el.decl.name, createVariable(ctx, inst, el.decl, el.declaredIn, el.type, el.mods));
+  // component, including class-typed ones declared later (`Gain g2 if g1.k > 0; Gain g1(k=1);`).
+  const create = (el: (typeof typed)[number]): void => {
+    if (isLeafType(el.type)) inst.components.set(el.decl.name, createVariable(ctx, inst, el.decl, el.declaredIn, el.type, el.mods));
+    else createSubInstance(ctx, inst, el.decl, el.declaredIn, el.type, el.mods);
+  };
+  for (const el of typed) if (isLeafType(el.type) && !el.decl.condition) create(el);
+  for (const el of typed) if (!isLeafType(el.type) && !el.decl.condition) create(el);
+  for (const leaf of [true, false]) {
+    for (const el of typed) {
+      if (!el.decl.condition || isLeafType(el.type) !== leaf) continue;
+      if (evaluateCondition(ctx, inst, el.decl, el.declaredIn)) create(el);
+      else inst.disabled.add(el.decl.name);
     }
-  }
-  for (const el of typed) {
-    if (!isLeafType(el.type) && !el.decl.condition) createSubInstance(ctx, inst, el.decl, el.declaredIn, el.type, el.mods);
-  }
-  for (const el of typed) {
-    if (isLeafType(el.type) || !el.decl.condition) continue;
-    if (!evaluateCondition(ctx, inst, el.decl, el.declaredIn)) {
-      inst.disabled.add(el.decl.name);
-      continue;
-    }
-    createSubInstance(ctx, inst, el.decl, el.declaredIn, el.type, el.mods);
   }
   inst.order = inst.order.filter((n) => !inst.disabled.has(n));
 }

@@ -10,12 +10,17 @@
  * Parameters and constants are baked in as numbers. Relational expressions (`<`, `<=`, `>`,
  * `>=`) that are not constant become zero-crossing "relations": during a step their Boolean
  * value is frozen (`ctx.frozen`) so that residuals stay smooth for Newton; the event handler
- * re-evaluates them after each step and locates crossings by bisection.
+ * re-evaluates them after each step and locates crossings by bisection. The event-generating
+ * functions `floor`, `ceil`, `integer`, `div` and the integer quotient inside `mod`/`rem`
+ * (Modelica §3.7.1) are monitored the same way as discrete-valued expressions whose frozen
+ * value is an integer. Inside `noEvent(...)`, when-clause bodies and initial equations no
+ * monitored expression is created: those are evaluated directly from their operands.
  */
 import { ModelicaError, type Diagnostic, type Expr } from '../ast.js';
 import type { BaseType, FlatEquation, FlatEquationKind, FlatModel, FlatVariable } from '../flat.js';
 import type { SimulationOptions } from '../simulation.js';
 import {
+  builtinName,
   evaluateConstant,
   formatExpr,
   getBinaryBuiltin,
@@ -32,9 +37,9 @@ export interface EvalContext {
   dv: Float64Array;
   /** Values before the current event (`pre(x)`), same layout as `v`. */
   pre: Float64Array;
-  /** Frozen Boolean values (0/1) of the zero-crossing relations. */
-  relVals: Uint8Array;
-  /** When true relations read `relVals`; when false they are evaluated from their operands. */
+  /** Frozen values of the monitored expressions: 0/1 for relations, the integer result for `floor`/`ceil`/`integer`/`div`. */
+  relVals: Float64Array;
+  /** When true monitored expressions read `relVals`; when false they are evaluated from their operands. */
   frozen: boolean;
   /** 1 for `sample(...)` operators that fire at the current time event. */
   sampleActive: Uint8Array;
@@ -70,12 +75,21 @@ export interface CompiledResidual {
 
 export type RelationOp = '<' | '<=' | '>' | '>=';
 
+/**
+ * A monitored (event-generating) expression: a relation (`kind: 'relation'`, value 0/1) or a
+ * discrete-valued function of continuous arguments such as `floor(x)` (`kind: 'discrete'`,
+ * integer value). `eval` computes the fresh value from the operands; during a step the
+ * compiled expression reads the frozen value `ctx.relVals[index]` instead.
+ */
 export interface CompiledRelation {
   index: number;
-  op: RelationOp;
-  left: Fn;
-  right: Fn;
+  kind: 'relation' | 'discrete';
+  eval: Fn;
   text: string;
+  /** Relational operator and operands (relations only). */
+  op?: RelationOp;
+  left?: Fn;
+  right?: Fn;
 }
 
 export type WhenAction =
@@ -88,6 +102,8 @@ export interface CompiledWhen {
   actions: WhenAction[];
   origin: string;
   text: string;
+  /** True when the condition contains `initial()`: the only when-clauses active during initialization (Modelica §8.6). */
+  initial: boolean;
 }
 
 export interface Sampler {
@@ -127,7 +143,7 @@ export function createContext(m: CompiledModel): EvalContext {
     v: new Float64Array(m.nU),
     dv: new Float64Array(m.nS),
     pre: new Float64Array(m.nU),
-    relVals: new Uint8Array(m.relations.length),
+    relVals: new Float64Array(m.relations.length),
     frozen: true,
     sampleActive: new Uint8Array(m.samplers.length),
     initial: false,
@@ -380,9 +396,22 @@ export function compileModel(flat: FlatModel, options: SimulationOptions): Compi
 
   interface Mode {
     noEvent: boolean;
+    /** Inside a when-clause body: evaluated at the event instant only. */
     inWhen: boolean;
+    /** Inside an initial equation: evaluated at initialization only. */
+    initial: boolean;
     where: string;
   }
+
+  /** True when relations and event-generating functions must be evaluated directly instead of creating monitored expressions. */
+  const eventFree = (mode: Mode): boolean => mode.noEvent || mode.inWhen || mode.initial;
+
+  /** Registers a discrete-valued expression whose value is frozen during a step and monitored for changes by the event handler. */
+  const monitored = (fn: Fn, text: string): Fn => {
+    const idx = relations.length;
+    relations.push({ index: idx, kind: 'discrete', eval: fn, text });
+    return (ctx) => (ctx.frozen ? ctx.relVals[idx] : fn(ctx));
+  };
 
   const fail = (mode: Mode, msg: string): never => {
     throw new ModelicaError(`${msg} (in ${mode.where})`);
@@ -492,7 +521,7 @@ export function compileModel(flat: FlatModel, options: SimulationOptions): Compi
       case '<=':
       case '>':
       case '>=': {
-        if (mode.noEvent) {
+        if (eventFree(mode)) {
           switch (op) {
             case '<':
               return (ctx) => (l(ctx) < r(ctx) ? 1 : 0);
@@ -505,7 +534,7 @@ export function compileModel(flat: FlatModel, options: SimulationOptions): Compi
           }
         }
         const idx = relations.length;
-        relations.push({ index: idx, op, left: l, right: r, text: formatExpr(e) });
+        relations.push({ index: idx, kind: 'relation', op, left: l, right: r, eval: (ctx) => (relationHolds(op, l(ctx), r(ctx)) ? 1 : 0), text: formatExpr(e) });
         switch (op) {
           case '<':
             return (ctx) => (ctx.frozen ? ctx.relVals[idx] : l(ctx) < r(ctx) ? 1 : 0);
@@ -558,10 +587,11 @@ export function compileModel(flat: FlatModel, options: SimulationOptions): Compi
         return (ctx) => (ctx.v[i] >= 0.5 && ctx.pre[i] < 0.5 ? 1 : 0);
       }
       case 'change': {
+        // change(v) = v <> pre(v) (exact, also for discrete Reals).
         const u = unknownRefArg(e, mode);
         if (!u) return () => 0;
         const i = u.index;
-        return (ctx) => (Math.abs(ctx.v[i] - ctx.pre[i]) >= 0.5 ? 1 : 0);
+        return (ctx) => (ctx.v[i] !== ctx.pre[i] ? 1 : 0);
       }
       case 'initial':
         return (ctx) => (ctx.initial ? 1 : 0);
@@ -611,35 +641,48 @@ export function compileModel(flat: FlatModel, options: SimulationOptions): Compi
     if (un) {
       if (e.args.length !== 1) return fail(mode, `'${callee}' expects 1 argument: ${formatExpr(e)}`);
       const a = compile(e.args[0], mode);
-      return (ctx) => un(a(ctx));
+      const fn: Fn = (ctx) => un(a(ctx));
+      // floor/ceil/integer are event-generating: their integer result is frozen during a step.
+      if (!eventFree(mode) && DISCRETE_UNARY.has(builtinName(callee))) return monitored(fn, formatExpr(e));
+      return fn;
     }
     const bi = getBinaryBuiltin(callee);
     if (bi) {
       if (e.args.length !== 2) return fail(mode, `'${callee}' expects 2 arguments: ${formatExpr(e)}`);
       const a = compile(e.args[0], mode);
       const b = compile(e.args[1], mode);
+      const bn = builtinName(callee);
+      if (!eventFree(mode) && (bn === 'div' || bn === 'mod' || bn === 'rem')) {
+        // Event-generating: the integer quotient (floor(a/b) for mod, div(a, b) = trunc(a/b) for
+        // div/rem) is frozen during a step and monitored; mod/rem stay smooth in between.
+        const quotient: Fn = bn === 'mod' ? (ctx) => Math.floor(a(ctx) / b(ctx)) : (ctx) => Math.trunc(a(ctx) / b(ctx));
+        const q = monitored(quotient, bn === 'mod' ? `floor(${formatExpr(e.args[0])} / ${formatExpr(e.args[1])})` : `div(${formatExpr(e.args[0])}, ${formatExpr(e.args[1])})`);
+        if (bn === 'div') return q;
+        return (ctx) => a(ctx) - q(ctx) * b(ctx);
+      }
       return (ctx) => bi(a(ctx), b(ctx));
     }
     return fail(mode, `Function '${callee}' is not supported in equations`);
   };
 
-  const compileEquation = (eq: FlatEquation, i: number): CompiledResidual => {
+  const compileEquation = (eq: FlatEquation, i: number, initial: boolean): CompiledResidual => {
     const text = equationText(eq);
-    const mode: Mode = { noEvent: false, inWhen: false, where: `equation '${text}' from ${eq.origin}` };
+    const mode: Mode = { noEvent: false, inWhen: false, initial, where: `${initial ? 'initial ' : ''}equation '${text}' from ${eq.origin}` };
     const l = compile(eq.left, mode);
     const r = compile(eq.right, mode);
     return { index: i, fn: (ctx) => l(ctx) - r(ctx), origin: eq.origin, text, kind: eq.kind };
   };
 
-  const residuals = flat.equations.map(compileEquation);
-  const initialResiduals = flat.initialEquations.map(compileEquation);
+  const residuals = flat.equations.map((eq, i) => compileEquation(eq, i, false));
+  // Initial equations are evaluated at initialization only: no zero-crossing functions from them.
+  const initialResiduals = flat.initialEquations.map((eq, i) => compileEquation(eq, i, true));
 
   const whens: CompiledWhen[] = flat.whenClauses.map((w, wi) => {
     const condText = formatExpr(w.cond);
-    const cond = compile(w.cond, { noEvent: false, inWhen: false, where: `when-condition '${condText}' from ${w.origin}` });
+    const cond = compile(w.cond, { noEvent: false, inWhen: false, initial: false, where: `when-condition '${condText}' from ${w.origin}` });
     const actions: WhenAction[] = w.equations.map((eq) => {
       const text = equationText(eq);
-      const mode: Mode = { noEvent: false, inWhen: true, where: `when-equation '${text}' from ${w.origin}` };
+      const mode: Mode = { noEvent: false, inWhen: true, initial: false, where: `when-equation '${text}' from ${w.origin}` };
       if (eq.left.kind === 'call' && eq.left.callee === 'reinit') {
         const call = eq.left;
         if (call.args.length !== 2 || call.args[0].kind !== 'ref') {
@@ -656,7 +699,7 @@ export function compileModel(flat: FlatModel, options: SimulationOptions): Compi
       const i = index.get(name)!;
       return { kind: 'assign', target: i, value: compile(eq.right, mode), text };
     });
-    return { index: wi, cond, actions, origin: w.origin, text: `when ${condText}` };
+    return { index: wi, cond, actions, origin: w.origin, text: `when ${condText}`, initial: containsCall(w.cond, 'initial') };
   });
 
   return {
@@ -679,6 +722,29 @@ export function compileModel(flat: FlatModel, options: SimulationOptions): Compi
 }
 
 // ---------------------------------------------------------------------------
+
+/** Unary builtins with an integer result that generate events when their argument crosses an integer. */
+const DISCRETE_UNARY = new Set(['floor', 'ceil', 'integer']);
+
+/** True when the expression contains a call of `callee` (e.g. `initial()`), at any depth. */
+export function containsCall(e: Expr, callee: string): boolean {
+  switch (e.kind) {
+    case 'call':
+      return e.callee === callee || e.args.some((a) => containsCall(a, callee)) || e.namedArgs.some((n) => containsCall(n.value, callee));
+    case 'binary':
+      return containsCall(e.left, callee) || containsCall(e.right, callee);
+    case 'unary':
+      return containsCall(e.operand, callee);
+    case 'if':
+      return e.branches.some((b) => containsCall(b.cond, callee) || containsCall(b.value, callee)) || containsCall(e.else, callee);
+    case 'array':
+      return e.elements.some((x) => containsCall(x, callee));
+    case 'range':
+      return containsCall(e.start, callee) || (e.step !== undefined && containsCall(e.step, callee)) || containsCall(e.end, callee);
+    default:
+      return false;
+  }
+}
 
 function coerceValue(raw: number | boolean | string, type: BaseType, name: string): ConstValue {
   if (type === 'String') return String(raw);

@@ -147,12 +147,15 @@ export function simulate(flat: FlatModel, options: SimulationOptions, hooks?: Si
       const rec = integrator.step(tMax);
       const te = events.locateStateEvent(rec, vE, dvE);
       if (!Number.isNaN(te)) {
+        // A time event at the same instant (a step clipped at a sample time whose relations
+        // flip there) is processed in the same event iteration; `nextTimeEvent` then moves on.
+        const timeEvent = events.timeEventDue(te);
         emitUpTo(rec, te, false);
         sys.t = te;
         sys.v.set(vE);
         sys.dv.set(dvE);
         sys.bindCanonical();
-        events.handleEvent(te, false);
+        events.handleEvent(te, timeEvent);
         skipOutputAt(te);
         integrator.restart();
       } else {

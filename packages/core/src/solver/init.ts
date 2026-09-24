@@ -2,21 +2,28 @@
  * Initialisation: solves the initial system (equations + initial equations) for the
  * algebraic variables, the derivatives and the free states at `startTime`.
  *
- * A state is free when `fixed = false` was given explicitly or when initial equations exist
- * (then min(#initial equations, #states without fixed=true) states are freed, preferring
- * those with fixed=false); all other states keep their `start` value. Newton starts from the
+ * When initial equations exist, one state without `fixed=true` is freed per initial equation.
+ * Which states are freed follows from a structural matching of the initialization system
+ * (`selectFreeStates`): the freed states are those the initial equations determine, directly
+ * (`y = 3`) or through the derivative equations (`der(y) = 0`), preferring states declared
+ * with `fixed=false`. All other states keep their `start` value. Newton starts from the
  * `start` guesses; on failure it retries with a full (refreshed every iteration) damped Newton
  * and finally with a Newton homotopy from the start values.
+ *
+ * When-clauses are inactive during initialization except those whose condition contains
+ * `initial()` (Modelica §8.6); the values of all other conditions at `startTime` are remembered
+ * so that a condition that is already true does not fire at the first event.
  *
  * Before the simultaneous solve, the initial system is sorted into BLT blocks
  * (`structural/blt-init.ts`) and solved block by block; the simultaneous strategies are the
  * fallback when a block does not converge or when the structural matching is not perfect.
  */
 import { ModelicaError } from '../ast.js';
-import type { UnknownInfo } from './compile.js';
+import type { CompiledModel, UnknownInfo } from './compile.js';
 import type { EventHandler } from './events.js';
 import { JacobianCache, newtonSolve, type NewtonProblem, type NewtonResult } from './newton.js';
 import { analyzeInitialization, solveInitializationBlockwise } from './structural/blt-init.js';
+import { incidenceColumns, maximumMatching } from './structural/matching.js';
 import { fmt, type System } from './system.js';
 
 const INIT_RTOL = 1e-10;
@@ -51,7 +58,12 @@ export function initialize(sys: System, events: EventHandler): void {
         `Initialization problem is overdetermined: ${nInit} initial equation${nInit === 1 ? '' : 's'} but only ${candidates.length} state${candidates.length === 1 ? '' : 's'} without fixed=true can be determined by them (${m.flat.className})`,
       );
     }
-    free = candidates.slice(0, nInit);
+    const matched = selectFreeStates(m, candidates);
+    if (matched) free = matched;
+    else {
+      sys.log('debug', 'Initialization: the initial equations cannot be matched structurally to the states; freeing the first states without fixed=true');
+      free = candidates.slice(0, nInit);
+    }
   }
   for (const u of states) {
     if (u.fixed === false && !free.includes(u)) {
@@ -100,7 +112,7 @@ export function initialize(sys: System, events: EventHandler): void {
   for (let j = 0; j < nFree; j++) z0[nA + nS + j] = free[j].start;
   const z = new Float64Array(z0);
   const cache = new JacobianCache(n);
-  const relFresh = new Uint8Array(m.relations.length);
+  const relFresh = new Float64Array(m.relations.length);
 
   // Block-wise (BLT) solve first; the simultaneous strategies are the fallback.
   const freeStates = free.map((u) => u.index);
@@ -156,13 +168,16 @@ export function initialize(sys: System, events: EventHandler): void {
     sys.log('warning', `Initialization: the if/relation structure did not become consistent after 20 iterations; continuing with the last solution`);
   }
 
-  // ---- when-clauses that are active at initialisation (e.g. `when initial()`) ---------------
-  if (m.whens.length > 0) {
+  // ---- when-clauses active at initialisation: only `when initial()`-style conditions -------
+  // Every other when-clause is inactive during initialization (its variables keep v = pre(v) =
+  // start); `initializeConditions` below remembers their condition values so that a condition
+  // that is already true at startTime does not fire at the first event.
+  if (m.whens.some((w) => w.initial)) {
     const cond = new Uint8Array(m.whens.length);
     events.evalConditions(t0, sys.v, sys.dv, cond);
     let applied = false;
     for (let w = 0; w < m.whens.length; w++) {
-      if (!cond[w]) continue;
+      if (!m.whens[w].initial || !cond[w]) continue;
       sys.bindCanonical();
       for (const act of m.whens[w].actions) {
         const value = act.value(ctx);
@@ -190,6 +205,90 @@ export function initialize(sys: System, events: EventHandler): void {
 }
 
 // ---------------------------------------------------------------------------------------------
+
+/**
+ * Chooses the states that the initial equations determine. The initialization system
+ * (equations + initial equations against algebraics, derivatives and the candidate states) is
+ * matched structurally: first the DAE equations against algebraics and derivatives (a perfect
+ * matching for an index-1 system), then each initial equation is added by an augmenting path.
+ * Matched vertices stay matched, so every path ends at a still-unmatched column, i.e. at a
+ * candidate state, and the freed states are exactly the candidates reached this way -- directly
+ * (`y = 3`) or through the derivative equations (`der(y) = 0` re-matches `der(y) = f(y)` to `y`).
+ * Candidates with `fixed=false` are tried first. Returns undefined when the DAE equations have
+ * no perfect matching or some initial equation cannot be matched (the caller then falls back to
+ * the declaration order).
+ */
+export function selectFreeStates(m: CompiledModel, candidates: readonly UnknownInfo[]): UnknownInfo[] | undefined {
+  const nS = m.nS;
+  const nA = m.nA;
+  const nAS = nA + nS;
+  const nEq = m.residuals.length;
+  const nInit = m.initialResiduals.length;
+  const nC = candidates.length;
+  if (nEq !== nAS) return undefined;
+  const candPos = new Map<number, number>();
+  candidates.forEach((u, j) => candPos.set(u.index, j));
+  // Columns: [0, nA) algebraics, [nA, nA+nS) derivatives, [nA+nS, nA+nS+nC) candidate states.
+  const column = (base: string, order: number): number | undefined => {
+    const idx = m.index.get(base);
+    if (idx === undefined) return undefined;
+    const u = m.unknowns[idx];
+    if (order === 0) {
+      if (u.kind === 'algebraic') return idx - nS;
+      if (u.kind === 'state') {
+        const p = candPos.get(idx);
+        return p === undefined ? undefined : nAS + p;
+      }
+      return undefined;
+    }
+    if (order === 1 && u.kind === 'state') return nA + idx;
+    return undefined;
+  };
+  const isUnknown = (name: string): boolean => m.index.has(name);
+  const equations = [...m.flat.equations, ...m.flat.initialEquations];
+  if (equations.length !== nEq + nInit) return undefined;
+  const adjacency = equations.map((eq) => incidenceColumns(eq.left, eq.right, isUnknown, column));
+
+  // 1. The DAE equations against algebraics and derivatives (the states themselves are known).
+  const dae = maximumMatching(nEq, nAS, adjacency.slice(0, nEq).map((cols) => cols.filter((c) => c < nAS)));
+  if (dae.size !== nEq) return undefined;
+  const eqToCol = new Int32Array(nEq + nInit).fill(-1);
+  const colToEq = new Int32Array(nAS + nC).fill(-1);
+  for (let i = 0; i < nEq; i++) {
+    eqToCol[i] = dae.leftToRight[i];
+    colToEq[eqToCol[i]] = i;
+  }
+
+  // 2. Augmenting paths (Kuhn) from every unmatched initial equation over the full graph.
+  const augment = (allowed: (col: number) => boolean): void => {
+    const visited = new Uint8Array(nEq + nInit);
+    const dfs = (u: number): boolean => {
+      visited[u] = 1;
+      for (const c of adjacency[u]) {
+        if (!allowed(c)) continue;
+        const w = colToEq[c];
+        if (w === -1 || (!visited[w] && dfs(w))) {
+          eqToCol[u] = c;
+          colToEq[c] = u;
+          return true;
+        }
+      }
+      return false;
+    };
+    for (let i = nEq; i < nEq + nInit; i++) {
+      if (eqToCol[i] !== -1) continue;
+      visited.fill(0);
+      dfs(i);
+    }
+  };
+  augment((c) => c < nAS || candidates[c - nAS].fixed === false);
+  augment(() => true);
+  for (let i = nEq; i < nEq + nInit; i++) if (eqToCol[i] === -1) return undefined;
+
+  const free: UnknownInfo[] = [];
+  for (let j = 0; j < nC; j++) if (colToEq[nAS + j] !== -1) free.push(candidates[j]);
+  return free.length === nInit ? free : undefined;
+}
 
 function solveWithStrategies(sys: System, problem: NewtonProblem, z: Float64Array, z0: Float64Array, cache: JacobianCache): NewtonResult {
   // 1. Modified Newton with line search from the start values.

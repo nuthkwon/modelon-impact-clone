@@ -473,8 +473,10 @@ describe('flatten: causal connectors', () => {
         connect(r2.n, n);
       end TwoResistors;
     end Tests;`);
-    // Balanced in strict mode: the environment closes the top-level connectors (p.i = n.i = free.i = 0).
-    const m = flatten(registry, 'Tests.TwoResistors');
+    // The environment closes every top-level flow (p.i = n.i = free.i = 0). The model is still
+    // unbalanced by exactly one equation: nothing determines `free.v` (Modelica §4.7 requires the
+    // model to use the potential variables of its connectors), hence strict: false.
+    const m = flatten(registry, 'Tests.TwoResistors', { strict: false });
     const flows = m.equations.filter((e) => e.kind === 'connect-flow').map(eqText);
     expect(flows).toEqual(['-p.i + r1.p.i = 0', 'r1.n.i + r2.p.i = 0', 'r2.n.i - n.i = 0']);
     const unconnected = m.equations.filter((e) => e.kind === 'unconnected-flow');
@@ -486,7 +488,10 @@ describe('flatten: causal connectors', () => {
       'n (top-level connector, flow set by the environment)',
       'free (unconnected)',
     ]);
-    expect(m.stats).toMatchObject({ unknowns: 24, equations: 24 });
+    expect(m.stats).toMatchObject({ unknowns: 24, equations: 23 });
+    expect(m.diagnostics.find((d) => d.code === 'unbalanced')?.message).toBe('The model is not balanced: 23 equations and 24 variables');
+    const used = new Set(m.equations.flatMap((e) => [...refsIn(e.left), ...refsIn(e.right)]));
+    expect(m.variables.filter((v) => v.variability === 'continuous' && !used.has(v.name)).map((v) => v.name)).toEqual(['free.v']);
   });
 });
 
@@ -995,7 +1000,7 @@ describe('flatten: elsewhen priority (finding: elsewhen never fires once an earl
 
   it('fires the elsewhen branch when its own condition becomes true while the first stays true (time steps)', () => {
     const flat = flatten(makeRegistry(stepModel), 'Tests.W');
-    const res = simulate(flat, { startTime: 0, finalTime: 3, ncp: 30, solver: 'CVode' });
+    const res = simulate(flat, { startTime: 0, finalTime: 3, ncp: 30, rtol: 1e-6, solver: 'CVode' });
     const x = res.trajectories.find((t) => t.name === 'x')!;
     const at = (t: number) => x.values[res.time.findIndex((tt) => tt >= t - 1e-9)];
     expect(at(0.5)).toBe(0);
@@ -1007,7 +1012,7 @@ describe('flatten: elsewhen priority (finding: elsewhen never fires once an earl
 
   it('fires the elsewhen branch on state thresholds', () => {
     const flat = flatten(makeRegistry(stepModel), 'Tests.Threshold');
-    const res = simulate(flat, { startTime: 0, finalTime: 3, ncp: 30, solver: 'CVode' });
+    const res = simulate(flat, { startTime: 0, finalTime: 3, ncp: 30, rtol: 1e-6, solver: 'CVode' });
     const mode = res.trajectories.find((t) => t.name === 'mode')!;
     expect(mode.values[mode.values.length - 1]).toBe(2);
     expect(mode.values[res.time.findIndex((t) => t >= 1 - 1e-9)]).toBe(1);
@@ -1017,7 +1022,7 @@ describe('flatten: elsewhen priority (finding: elsewhen never fires once an earl
     const flat = flatten(makeRegistry(stepModel), 'Tests.Simultaneous');
     expect(flat.whenClauses.map((w) => printExpr(w.cond))).toEqual(['b1', 'b2 and not edge(b1)']);
     expect(flat.variables.some((v) => v.name.startsWith('$whenCondition'))).toBe(false);
-    const res = simulate(flat, { startTime: 0, finalTime: 2, ncp: 20, solver: 'CVode' });
+    const res = simulate(flat, { startTime: 0, finalTime: 2, ncp: 20, rtol: 1e-6, solver: 'CVode' });
     const a = res.trajectories.find((t) => t.name === 'a')!;
     expect(a.values[a.values.length - 1]).toBe(1);
   });
@@ -1026,7 +1031,7 @@ describe('flatten: elsewhen priority (finding: elsewhen never fires once an earl
     const flat = flatten(makeRegistry(stepModel), 'Tests.Three');
     expect(flat.whenClauses.map((w) => printExpr(w.cond))).toEqual(['never', 'time >= 1', 'time >= 2 and not edge($whenCondition1)']);
     expect(flat.variables.filter((v) => v.name.startsWith('$whenCondition')).map((v) => v.name)).toEqual(['$whenCondition1']);
-    const res = simulate(flat, { startTime: 0, finalTime: 3, ncp: 30, solver: 'CVode' });
+    const res = simulate(flat, { startTime: 0, finalTime: 3, ncp: 30, rtol: 1e-6, solver: 'CVode' });
     const a = res.trajectories.find((t) => t.name === 'a')!;
     expect(a.values[a.values.length - 1]).toBe(2);
   });
@@ -1122,7 +1127,8 @@ describe('flatten: hierarchical connectors (findings: partial composite connecto
     expect(potentials).toEqual(expect.arrayContaining(['d1.plug.pin1.v = d2.plug.pin1.v', 'd1.plug.pin1.v = v.p.v', 'd1.plug.pin2.v = d2.plug.pin2.v', 'd1.plug.pin2.v = v.n.v', 'd1.plug.pin2.v = g.p.v']));
     const origins = m.equations.filter((e) => e.kind === 'connect-flow').map((e) => e.origin);
     expect(origins).toContain('connect(d1.plug, d2.plug, v.p)');
-    expect(m.stats).toMatchObject({ unknowns: 34, equations: 34 });
+    expect(m.stats).toMatchObject({ unknowns: 28, equations: 28 });
+    expect(m.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
   });
 
   it('closes internally connected top-level connectors and inputs with environment equations (locally balanced models)', () => {
@@ -1132,7 +1138,7 @@ describe('flatten: hierarchical connectors (findings: partial composite connecto
     const env = pin.equations.filter((e) => e.kind === 'unconnected-flow');
     expect(env.map(eqText)).toEqual(['p.i = 0']);
     expect(env[0].origin).toBe('p (top-level connector, flow set by the environment)');
-    expect(pin.stats).toMatchObject({ unknowns: 13, equations: 13 });
+    expect(pin.stats).toMatchObject({ unknowns: 10, equations: 10 });
 
     const input = flatten(registry, 'Tests.TopInput');
     expect(input.equations.map(eqText)).toEqual(['g.y = g.k*g.u', 'u = g.u', 'u = 0']);
@@ -1140,12 +1146,13 @@ describe('flatten: hierarchical connectors (findings: partial composite connecto
     expect(input.diagnostics.map((d) => d.message)).toEqual(expect.arrayContaining([expect.stringMatching(/Top-level input 'u' has no value; using 0/)]));
     expect(input.stats).toMatchObject({ unknowns: 3, equations: 3 });
 
-    // Every flow leaf of a top-level hierarchical connector is closed, connected or not.
-    const plug = flatten(registry, 'Tests.TopPlug');
+    // Every flow leaf of a top-level hierarchical connector is closed, connected or not (the
+    // model itself is unbalanced by one: it never uses plug.pin2.v).
+    const plug = flatten(registry, 'Tests.TopPlug', { strict: false });
     const zero = plug.equations.filter((e) => e.kind === 'unconnected-flow');
     expect(zero.map(eqText)).toEqual(['r.n.i = 0', 'plug.pin1.i = 0', 'plug.pin2.i = 0']);
     expect(zero.map((e) => e.origin)).toEqual(['r.n (unconnected)', 'plug.pin1 (top-level connector, flow set by the environment)', 'plug.pin2 (unconnected)']);
-    expect(plug.stats).toMatchObject({ unknowns: 10, equations: 10 });
+    expect(plug.stats).toMatchObject({ unknowns: 10, equations: 9 });
   });
 });
 
@@ -1219,9 +1226,10 @@ describe('flatten: conditional components referring to later components (finding
       end CondOrder;
     end Tests;`);
     const m = flatten(registry, 'Tests.CondOrder', { strict: false });
-    expect(names(m)).toEqual(['g1.u', 'g1.y', 'g1.k', 'g2.u', 'g2.y', 'g2.k', 'p']);
+    // Declaration order is kept in the output even though g1 was instantiated before g2.
+    expect(names(m)).toEqual(['g2.u', 'g2.y', 'g2.k', 'g1.u', 'g1.y', 'g1.k', 'p']);
     expect(variable(m, 'p').value).toBe(1);
-    expect(m.equations.map(eqText)).toEqual(['g1.y = g1.k*g1.u', 'g2.y = g2.k*g2.u']);
+    expect(m.equations.map(eqText)).toEqual(['g2.y = g2.k*g2.u', 'g1.y = g1.k*g1.u']);
   });
 });
 
