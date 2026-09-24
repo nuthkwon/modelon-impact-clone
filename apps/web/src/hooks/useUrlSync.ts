@@ -5,6 +5,7 @@
 import { useEffect, useRef } from 'react';
 import { useStore } from '../store';
 import type { Mode, View } from '../store/types';
+import { currentPath, currentSearch, currentUrl, replaceUrl } from '../routing';
 
 const MODES: Mode[] = ['model', 'experiment', 'results'];
 const VIEWS: View[] = ['diagram', 'code'];
@@ -22,7 +23,7 @@ export function decodePathSegment(segment: string): string {
   }
 }
 
-export function readWorkspaceQuery(search = window.location.search): { className?: string; mode?: Mode; view?: View } {
+export function readWorkspaceQuery(search = currentSearch()): { className?: string; mode?: Mode; view?: View } {
   const q = new URLSearchParams(search);
   const cls = q.get('class') ?? undefined;
   const mode = q.get('mode') as Mode | null;
@@ -71,8 +72,8 @@ export function useUrlSync(workspaceId: string): void {
     if (mode !== 'model') q.set('mode', mode);
     if (view !== 'diagram') q.set('view', view);
     const search = q.toString();
-    const url = `${window.location.pathname}${search ? `?${search}` : ''}`;
-    if (url !== `${window.location.pathname}${window.location.search}`) window.history.replaceState(window.history.state, '', url);
+    const url = `${currentPath()}${search ? `?${search}` : ''}`;
+    if (url !== currentUrl()) replaceUrl(url);
   }, [workspaceId, activeClass, mode, view]);
 }
 

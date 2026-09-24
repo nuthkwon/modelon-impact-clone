@@ -70,7 +70,7 @@ const json = (body: unknown): RequestInit => ({ method: 'POST', body: JSON.strin
 const putJson = (body: unknown): RequestInit => ({ method: 'PUT', body: JSON.stringify(body) });
 const enc = encodeURIComponent;
 
-export const api = {
+export const remoteApi = {
   // workspaces
   listWorkspaces: () => request<ItemsResponse<Workspace>>(API.workspaces()),
   createWorkspace: (req: CreateWorkspaceRequest) => request<Workspace>(API.workspaces(), json(req)),
@@ -126,4 +126,31 @@ export const api = {
   caseResultCsvUrl: (wid: string, eid: string, cid: string) => API.caseResult(wid, eid, cid),
 };
 
-export type Api = typeof api;
+export type Api = typeof remoteApi;
+
+// ---------------------------------------------------------------------------
+// Implementation switch: the app talks to the REST server by default; a browser-only
+// implementation (apps/web/src/api/local) can be plugged in for static/demo deployments.
+// ---------------------------------------------------------------------------
+
+export type ApiMode = 'remote' | 'local';
+
+let current: Api = remoteApi;
+let currentMode: ApiMode = 'remote';
+
+/** Replaces the active API implementation (call before the first render). */
+export function setApiImplementation(impl: Api, mode: ApiMode): void {
+  current = impl;
+  currentMode = mode;
+}
+
+export function getApiMode(): ApiMode {
+  return currentMode;
+}
+
+/** Facade used by the store and components; delegates every call to the active implementation. */
+export const api: Api = new Proxy({} as Api, {
+  get(_target, prop: string) {
+    return (current as unknown as Record<string, unknown>)[prop];
+  },
+}) as Api;

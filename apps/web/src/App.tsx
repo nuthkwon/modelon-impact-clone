@@ -8,18 +8,15 @@ import { WorkspacePage } from './pages/WorkspacePage';
 import { ContextMenuHost } from './components/common/ContextMenu';
 import { ShellDialogs } from './components/shell/ShellDialogs';
 import { decodePathSegment } from './hooks/useUrlSync';
+import { currentPath, currentUrl, onNavigate, pushUrl } from './routing';
 
 export function usePath(): [string, (path: string) => void] {
-  const [path, setPath] = useState(window.location.pathname);
-  useEffect(() => {
-    const onPop = () => setPath(window.location.pathname);
-    window.addEventListener('popstate', onPop);
-    return () => window.removeEventListener('popstate', onPop);
-  }, []);
+  const [path, setPath] = useState(currentPath());
+  useEffect(() => onNavigate(() => setPath(currentPath())), []);
   const navigate = (p: string) => {
     const [pathname] = p.split('?');
-    if (p === `${window.location.pathname}${window.location.search}`) return;
-    window.history.pushState(null, '', p);
+    if (p === currentUrl()) return;
+    pushUrl(p);
     setPath(pathname);
   };
   return [path, navigate];
