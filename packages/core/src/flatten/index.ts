@@ -43,7 +43,6 @@ export function flatten(registry: ClassRegistry, className: string, options: Fla
     paramVisiting: new Set(),
     usedModifiers: new Set(),
     whenTargets: new Set(),
-    connectionEquations: [],
   };
 
   // A. instance tree

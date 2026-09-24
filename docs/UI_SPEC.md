@@ -35,7 +35,8 @@ strip with a "Libraries" icon.
 
 ## 3. Navigation bar ("App bar")
 
-- Height 48px, background `--nav-bg` (#1e1e1e), white text/icons, no shadow.
+- Height 54px, background `--nav-bg` (white), 1px bottom border `--nav-border`, dark-grey text
+  (`--nav-fg`); icon buttons are `#666666` glyphs on `#ebebeb` rounded squares (32px, 6px radius).
 - Left: application logo (24px glyph + "IMPACT" wordmark in white; the glyph is a generic
   stylised "M" — not Modelon's trademarked logo). Click → Home page. Hover tooltip: "Impact
   Clone <version>". Right of it, the workspace name (13px, opacity .8), tooltip shows the id.
@@ -43,8 +44,8 @@ strip with a "Libraries" icon.
   1. Model mode — icon "diagram", label = active class short name (e.g. `RCCircuit`), tooltip "Model mode (1)".
   2. Experiment mode — icon "sliders", label = active experiment name (`Experiment 1`; a "virtual" experiment is created automatically for a model that has none), tooltip "Experiment mode (2)".
   3. Results mode — icon "chart", label = active result name (`Result1`) or "Results" when none, tooltip "Results mode (3)".
-  Active button: white text, 3px accent underline `--accent`; inactive: 70% white. Keys `1`,
-  `2`, `3` switch modes (when focus is not in an input).
+  Active button: `--accent` text on an `--accent-soft` pill (40px tall, 8px radius); inactive:
+  `--text-secondary`. Keys `1`, `2`, `3` switch modes (when focus is not in an input).
 - Right: view toggle (two icon buttons "Diagram view" / "Code view", active filled), "Apps"
   grid icon menu (Workspace Management, Documentation), settings gear (opens Application
   settings dialog), help "?" menu (Documentation, Keyboard shortcuts, Support, About),
@@ -82,7 +83,8 @@ strip with a "Libraries" icon.
 
 ### 5.1 Diagram View
 - Background `--canvas-bg` (white). Grid hidden by default; Application settings
-  "Show grid" turns on 20-unit dots (`--grid-dot`), "Enable snapping" snaps moves to the grid.
+  "Show grid" turns on thin 1px solid `--grid-line` lines every 20 model units, "Enable
+  snapping" snaps moves to the grid.
 - The class's `Diagram` coordinate system extent is fitted into the viewport on open (padding
   40px). Zoom: `Ctrl` + wheel, `Ctrl` `+`/`-`, pinch; pan: wheel (no modifier scrolls), middle
   mouse or `Space`+drag. Zoom range 10%–800%. A small zoom % readout with "Fit" button sits at
@@ -120,13 +122,14 @@ strip with a "Libraries" icon.
   default; a small "Read-only" chip at the top-left of the canvas).
 
 ### 5.2 Floating action buttons (right side of the canvas, vertically centred)
-- **Execution** button ("Play"): 48px circular FAB. States: *idle* — `--accent` blue with a
-  white play triangle (disabled/grey for classes that cannot be simulated: packages, partial
-  classes, connectors, types); *running* — spinner ring around the button, tooltip "Cancel",
-  click cancels; *pending* — label "Pending…" chip; *done* — turns **orange** (`--orange`)
-  while the latest result is available for the active model. Hover reveals a drop-down: "Simulate"
-  (Dynamic), "Simulate steady state", "Compile only", "Re-compile and simulate".
-- **Views** button: 40px circular FAB with an **orange eye icon** (`--orange` on white).
+- **Execution** button ("Play"): 56px white circular FAB (soft shadow) with an **orange play
+  triangle** (`--orange`). States: *idle* — white disc, orange ▶ (disabled: grey ▶ for classes
+  that cannot be simulated: packages, partial classes, connectors, types); *running* — orange
+  progress ring around the disc, inner icon Stop, tooltip "Cancel", click cancels; *pending* —
+  label "Pending…" chip; *done* — filled **orange** disc with white ▶ while the latest result is
+  available for the active model. Hover reveals a drop-down: "Simulate" (Dynamic), "Simulate
+  steady state", "Compile only", "Re-compile and simulate".
+- **Views** button: 44px white circular FAB with an **orange eye icon** (`--orange`).
   Hover drop-down: "Save view…", saved view names (restores plots & stickies), "Clear canvas".
 
 ### 5.3 Overlays
@@ -137,16 +140,19 @@ strip with a "Libraries" icon.
   bottom panel (height 220px, resizable) with two tabs "Compilation log" and "Simulation log",
   monospace 12px, coloured by level (warning amber, error red), a level filter and a
   "Download" button. The icon shows a red badge when the last run produced errors.
-- **Time slider** appears at the bottom-centre of the canvas after a successful simulation:
-  play/pause, step back/forward (arrow keys), slider from start to stop time, current time
-  input with unit "s". Drives sticky values, the Variables/Calculated values numbers and a
-  vertical cursor line in every plot. For multi-case results a **Case slider** with the case
-  label sits next to it.
+- **Time slider** appears at the bottom-centre of the canvas after a successful simulation as a
+  white card (≈240×70px, `--card-border`, shadow): first line "Current time: **23.4** s" with
+  play/pause and step buttons at the right, second line a range slider from start to stop time
+  with the min/max labels at both ends and a `--slider` knob (arrow keys step). Drives sticky
+  values, the Variables/Calculated values numbers and a dashed vertical cursor line in every
+  plot. For multi-case results a **Case slider** with the case label sits next to it.
 - **Read-only chip**, **zoom readout** as described above.
 
 ### 5.4 Stickies
-Small cards (min 120px wide, white, 1px `--border`, 2px shadow, 12px text) attached to a
-component (offset stored relative to the component origin) showing `variable = value unit`.
+White cards (min 140px wide, 6px radius, 1px `--card-border`, soft shadow, 13px text) attached
+to a component (offset stored relative to the component origin): title row = component name in
+600 weight; one row per variable: small orange bullet, variable name, value in an
+`--accent-chip` chip (right-aligned), grey unit after the chip.
 Created from the eye icon in PROPERTIES / CALCULATED VALUES. Editable stickies (parameters)
 contain an input; result stickies show the value at the slider time. Buttons on hover: pin,
 close. Draggable.
@@ -154,10 +160,11 @@ close. Draggable.
 ### 5.5 Plots on the canvas
 A plot is a floating window (default 500×300 px, min 240×160) with a 28px toolbar: drag
 handle (⋮⋮ at top-left), title ("Plot 1", "Plot 2", … editable on double-click), buttons: hide/
-show legend, plot settings (gear: title, X variable, log Y, grid), pin, close. Body: Plotly-like
-chart on white, light grey gridlines (#e5e5e5), axes labels in 11px, legend at the bottom with
-colour dot + fully-qualified variable name (`resistor.v`), `[Result2]` suffix when several
-results are compared. Palette (category10): `#1f77b4 #ff7f0e #2ca02c #d62728 #9467bd #8c564b
+show legend, plot settings (gear: title, X variable, log Y, grid), pin, close. Body: chart on white
+with a 1px `--plot-frame` frame, light grey gridlines (`--plot-grid`), tick text `--plot-axis`
+11px, x-axis title "Time [s]", plot title above in 600 weight; legend **at the right** (toggle to
+hide) grouped by component: 600 group name (`resistor`) then rows "● v", "● i" with colour
+bullets; `[Result2]` suffix when several results are compared. Palette (category10): `#1f77b4 #ff7f0e #2ca02c #d62728 #9467bd #8c564b
 #e377c2 #7f7f7f #bcbd22 #17becf`. Interactions: hover → vertical guide + tooltip listing every
 trace value at that time; click-drag → box zoom; double-click → reset autoscale; wheel → zoom
 around cursor; legend item click toggles a trace; dropping a variable on the plot adds it; the
@@ -290,33 +297,69 @@ canvas (creates a plot) or onto a plot (adds a trace / sets X axis via the drop 
 
 ## 9. Colours & typography (tokens)
 
-| Token | Light | Dark mode |
-| --- | --- | --- |
-| `--nav-bg` | #1e1e1e | #121212 |
-| `--nav-fg` | #ffffff | #ffffff |
-| `--accent` | #1976d2 | #64b5f6 |
-| `--accent-hover` | #1565c0 | #90caf9 |
-| `--orange` | #ff9800 | #ffb74d |
-| `--canvas-bg` | #ffffff | #ffffff (canvas stays bright unless "Exclude plots…" off) |
-| `--grid-dot` | #d9d9d9 | #444 |
-| `--panel-bg` | #fafafa | #1e1e1e |
-| `--surface` | #ffffff | #252526 |
-| `--border` | #e0e0e0 | #3c3c3c |
-| `--hover` | rgba(0,0,0,.04) | rgba(255,255,255,.06) |
-| `--selection-bg` | #e3f2fd | #1e3a5f |
-| `--experiment-bg` | #e3f2fd (with 1px #90caf9 frame) | #1e3a5f |
-| `--text-primary` | rgba(0,0,0,.87) | rgba(255,255,255,.87) |
-| `--text-secondary` | rgba(0,0,0,.6) | rgba(255,255,255,.6) |
-| `--error` | #d32f2f | #ef5350 |
-| `--error-bg` | #fdecea | #4a1f1f |
-| `--warning` | #f57c00 | #ffb74d |
-| `--success` | #388e3c | #81c784 |
-| `--port-compatible` | #43a047 | #66bb6a |
-| `--shadow-1` | 0 1px 3px rgba(0,0,0,.2) | 0 1px 3px rgba(0,0,0,.6) |
+Values were pixel-sampled from real Modelon Impact screenshots (2020 result view with
+stickies/plots/FABs/time slider; 2023 Workspace Configuration and Apps menu; Diagram View
+canvas). The product is a **light-themed, custom (non-Material) design**: white surfaces, very
+light grey containers, dark-grey text, a warm-orange accent for active/selected state and
+brand, royal-blue pill buttons for primary actions. Tokens live in
+`apps/web/src/styles/tokens.css`.
 
-Font: `Roboto, "Segoe UI", "Helvetica Neue", Arial, sans-serif`, base 13px, headings 14px/500;
-monospace `"JetBrains Mono", "Fira Code", Consolas, monospace` 12px. Icons: inline SVG,
-Material-style 20px outlined glyphs (`apps/web/src/components/icons.tsx`).
+| Token | Value | Used for |
+| --- | --- | --- |
+| `--nav-bg` / `--nav-fg` | #ffffff / #3d3d3d | App bar (white, 54px, 1px bottom border `#ebebeb`); icon buttons are `#666666` glyphs on `#ebebeb` rounded squares |
+| `--accent` | #e56400 | Active mode button text, selected tree row text, active tab text + underline, orange bullets, "+" icons |
+| `--accent-soft` | #fff3e6 | Active nav pill background, selected tree row background, experiment path band |
+| `--accent-chip` | #fbeede | Value chips inside stickies |
+| `--orange` | #f49730 | Play / eye FAB icons, "simulation complete" ring |
+| `--primary` / `--primary-fg` | #4169e1 / #ffffff | Contained pill buttons ("DONE", "CLONE", "SIMULATE"), links |
+| `--primary-soft` / `--menu-hover-*` | #e9eefc / text #4169e1 | Menu hover/selected rows, text-button hover |
+| `--focus` | #b0c0f2 | Focus rings, dashed drop-zone border |
+| `--dropzone-bg` | #f2f5f9 | Drop zones ("Drop libraries here…", plot X/Y drop zones) |
+| `--canvas-bg` / `--grid-line` | #ffffff / #eae8ea | Canvas; grid = **thin 1px solid lines every 20 model units** (not dots) |
+| `--panel-bg` / `--surface` / `--surface-2` | #ffffff / #ffffff / #f7f7f8 | Panels; list/card containers |
+| `--input-bg` | #f2f2f2 | Borderless text inputs (4px radius) |
+| `--border` / `--border-strong` / `--card-border` | #ebebeb / #dadada / #dadada | Dividers; sticky/time-card borders |
+| `--selection-bg` / `--selection-fg` | #fff3e6 / #e56400 | Active class row, active experiment/result row |
+| `--experiment-bg` / `--experiment-border` | #e9eefc / #b0c0f2 | Experiment-value inputs ("blue background and frame") |
+| `--text-primary` / `--text-secondary` / `--text-label` / `--text-disabled` / `--caps` | #3d3d3d / #666666 / #8c8c8c / #a6a6a6 / #bfbfbf | Body text; secondary; form labels; muted; uppercase menu group headers |
+| `--error` / `--error-bg` | #d32f2f / #fdecea | Error banners, red dots |
+| `--warning` | #e56400 | Warnings |
+| `--success` / `--teal` | #2e9e6b / #6fe1ca | Success check; synced icon |
+| `--slider` | #15b5e9 | Time slider knob (20px) |
+| `--plot-bg` / `--plot-frame` / `--plot-grid` / `--plot-axis` | #ffffff / #bcbcbc / #e5e5e5 / #5f5f5f | Plot background, frame, gridlines, tick text |
+| `--plot-c1..c10` | #1f77b4 #ff7f0e #2ca02c #d62728 #9467bd #8c564b #e377c2 #7f7f7f #bcbd22 #17becf | Series palette (category10, as persisted in Impact "Views" files) |
+
+**Typography**: `"Titillium Web"` (Google Fonts, weights 400/600/700; fallback Segoe UI,
+Roboto, sans-serif). Body 14px/400; emphasis (workspace name, nav mode labels, section
+captions, button labels, sticky titles, plot legend group names) 600. Uppercase 600 with
+0.04–0.06em letter-spacing for section captions ("PROJECTS", "LIBRARIES", "EDITABLE
+LIBRARIES"), tab labels and button captions. Dialog titles 20px/600 ("Editing **Name**").
+Monospace `"JetBrains Mono", Consolas, monospace` 12px for code/logs. Modelica diagram texts
+use Arial/Helvetica (they come from `Text` annotations).
+
+**Shapes**: buttons are full pills (`border-radius: 999px`, 40px tall, uppercase 600 label;
+secondary = white pill with 1px dark border); cards 6–8px radius with 1px `--card-border` and a
+soft shadow; inputs borderless `--input-bg` 4px radius; list containers `--surface-2` 8px radius.
+
+**Measured component looks**
+- *Mode buttons / nav items*: icon + 600-weight label; active = `--accent` text on a
+  `--accent-soft` pill (≈48px tall, 8px radius); inactive `--text-secondary`.
+- *Apps menu*: white, soft shadow, ~250px wide; uppercase `--caps` group headers ("WORKSPACE
+  MANAGEMENT", "GENERAL APPS", "TOOLS - ADVANCED"); items 14px `--text-primary`; hover row
+  `--menu-hover-bg` with `--menu-hover-fg` text; external items carry an open-in-new icon.
+- *Execution & Views FABs*: white circles (56px / 44px) with soft shadow and **orange**
+  (`--orange`) play ▶ / eye icons; the play button gets an orange ring while running, a filled
+  orange disc when results are available.
+- *Stickies*: white card, 6px radius, 1px `--card-border`, soft shadow; title = component name
+  (600); rows = small orange bullet + variable name + value in a `--accent-chip` chip + grey unit.
+- *Time slider*: white card (≈233×66px) bottom-centre: "Current time: 23.4 s" (600 for the
+  number) above a range slider with min/max labels and a `--slider` knob.
+- *Plots*: white, 1px `--plot-frame` frame, title above (600), axis title "Time [s]", tick text
+  `--plot-axis` 11px, dashed vertical time-cursor line, legend **at the right** grouped by
+  component (600 group name, then "● variable" rows with colour bullets).
+- *Result view*: top-level components of the open model get dashed grey (#5f5f5f) frames.
+- *Experiment path band* (2020 style, optional): 30px `--accent-soft` band with the class path
+  in light orange and the active name in `--accent`.
 
 ## 10. Keyboard shortcuts
 

@@ -416,8 +416,7 @@ describe('flatten: causal connectors', () => {
     // Modelica.Math.sin was stripped to sin and Mini.Constants.pi inlined
     const sineEq = m.equations.find((e) => e.origin.startsWith('sine'))!;
     expect(eqText(sineEq)).toMatch(/^sine\.y = sine\.amplitude\*sin\(2\*3\.14159\d+\*sine\.f\*time\)$/);
-    const piLiteral = refsIn(sineEq.right).length === 3 ? (sineEq.right as Expr & { kind: 'binary' }) : undefined;
-    expect(piLiteral).toBeDefined();
+    expect(refsIn(sineEq.right)).toEqual(['sine.amplitude', 'sine.f', 'time']);
   });
 
   it('binds an unconnected top-level input to its start value with a warning and warns on unconnected inside inputs', () => {

@@ -1,45 +1,90 @@
-/* Design tokens — see docs/UI_SPEC.md §9. Dark mode is opt-in via html[data-theme="dark"]. */
+/*
+ * Design tokens — values pixel-sampled from real Modelon Impact screenshots (see
+ * docs/UI_SPEC.md §9): light theme, white app bar, Titillium Web, warm-orange accent for
+ * active/selected state, royal-blue primary action buttons, pale-orange highlights.
+ * Dark mode is opt-in via html[data-theme="dark"] (Impact: "Enable dark mode (Public Beta)").
+ */
 :root {
-  --nav-bg: #1e1e1e;
-  --nav-fg: #ffffff;
-  --nav-fg-muted: rgba(255, 255, 255, 0.7);
-  --accent: #1976d2;
-  --accent-hover: #1565c0;
+  /* app bar */
+  --nav-bg: #ffffff;
+  --nav-fg: #3d3d3d;
+  --nav-fg-muted: #666666;
+  --nav-border: #ebebeb;
+  --nav-icon-bg: #ebebeb;
+  --nav-height: 54px;
+
+  /* accent (active / selected / brand) */
+  --accent: #e56400;
+  --accent-hover: #cf5a00;
   --accent-fg: #ffffff;
-  --orange: #ff9800;
-  --orange-hover: #fb8c00;
+  --accent-soft: #fff3e6;
+  --accent-chip: #fbeede;
+  --orange: #f49730;
+  --orange-hover: #e8861c;
+
+  /* primary action (buttons, links, menu hover) */
+  --primary: #4169e1;
+  --primary-hover: #3358c9;
+  --primary-fg: #ffffff;
+  --primary-soft: #e9eefc;
+  --focus: #b0c0f2;
+  --dropzone-bg: #f2f5f9;
+  --dropzone-border: #b0c0f2;
+
+  /* surfaces */
   --canvas-bg: #ffffff;
-  --grid-dot: #d9d9d9;
-  --panel-bg: #fafafa;
+  --grid-line: #eae8ea;
+  --grid-dot: #eae8ea;
+  --panel-bg: #ffffff;
   --surface: #ffffff;
-  --surface-2: #f5f5f5;
-  --border: #e0e0e0;
-  --border-strong: #bdbdbd;
-  --hover: rgba(0, 0, 0, 0.04);
-  --active: rgba(0, 0, 0, 0.08);
-  --selection-bg: #e3f2fd;
-  --experiment-bg: #e3f2fd;
-  --experiment-border: #90caf9;
-  --text-primary: rgba(0, 0, 0, 0.87);
-  --text-secondary: rgba(0, 0, 0, 0.6);
-  --text-disabled: rgba(0, 0, 0, 0.38);
+  --surface-2: #f7f7f8;
+  --input-bg: #f2f2f2;
+  --border: #ebebeb;
+  --border-strong: #dadada;
+  --card-border: #dadada;
+  --hover: #f2f2f2;
+  --active: #ebebeb;
+  --selection-bg: #fff3e6;
+  --selection-fg: #e56400;
+  --menu-hover-bg: #e9eefc;
+  --menu-hover-fg: #4169e1;
+  --experiment-bg: #e9eefc;
+  --experiment-border: #b0c0f2;
+
+  /* text */
+  --text-primary: #3d3d3d;
+  --text-secondary: #666666;
+  --text-label: #8c8c8c;
+  --text-disabled: #a6a6a6;
+  --caps: #bfbfbf;
+
+  /* status */
   --error: #d32f2f;
   --error-bg: #fdecea;
-  --warning: #f57c00;
-  --warning-bg: #fff3e0;
-  --success: #388e3c;
+  --warning: #e56400;
+  --warning-bg: #fff3e6;
+  --success: #2e9e6b;
+  --teal: #6fe1ca;
+  --slider: #15b5e9;
   --port-compatible: #43a047;
   --port-incompatible: #bdbdbd;
-  --shadow-1: 0 1px 3px rgba(0, 0, 0, 0.2);
-  --shadow-2: 0 2px 8px rgba(0, 0, 0, 0.24);
-  --shadow-3: 0 6px 20px rgba(0, 0, 0, 0.28);
-  --font: Roboto, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+
+  --shadow-1: 0 1px 3px rgba(0, 0, 0, 0.12);
+  --shadow-2: 0 2px 10px rgba(0, 0, 0, 0.14);
+  --shadow-3: 0 8px 28px rgba(0, 0, 0, 0.18);
+
+  --font: "Titillium Web", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: "JetBrains Mono", "Fira Code", Consolas, "Liberation Mono", monospace;
-  --font-size: 13px;
-  --nav-height: 48px;
+  --font-size: 14px;
   --radius: 4px;
+  --radius-card: 8px;
+  --radius-pill: 999px;
+
+  /* plots */
+  --plot-bg: #ffffff;
   --plot-grid: #e5e5e5;
-  --plot-axis: #444444;
+  --plot-frame: #bcbcbc;
+  --plot-axis: #5f5f5f;
   --plot-c1: #1f77b4;
   --plot-c2: #ff7f0e;
   --plot-c3: #2ca02c;
@@ -54,26 +99,45 @@
 }
 
 html[data-theme="dark"] {
-  --nav-bg: #121212;
-  --accent: #64b5f6;
-  --accent-hover: #90caf9;
-  --accent-fg: #0d1b2a;
+  --nav-bg: #1e1e1e;
+  --nav-fg: #f2f2f2;
+  --nav-fg-muted: #bdbdbd;
+  --nav-border: #333333;
+  --nav-icon-bg: #333333;
+  --accent: #ff8a2a;
+  --accent-hover: #ffa052;
+  --accent-soft: #3a2a1c;
+  --accent-chip: #3a2a1c;
   --orange: #ffb74d;
-  --orange-hover: #ffa726;
-  --grid-dot: #444444;
+  --primary: #7c9df0;
+  --primary-hover: #9db6f5;
+  --primary-fg: #0d1b2a;
+  --primary-soft: #1e2a44;
+  --focus: #3a5aa8;
+  --dropzone-bg: #1c2233;
+  --dropzone-border: #3a5aa8;
+  --grid-line: #3a3a3a;
+  --grid-dot: #3a3a3a;
   --panel-bg: #1e1e1e;
   --surface: #252526;
   --surface-2: #2d2d2d;
+  --input-bg: #333333;
   --border: #3c3c3c;
   --border-strong: #5a5a5a;
+  --card-border: #4a4a4a;
   --hover: rgba(255, 255, 255, 0.06);
   --active: rgba(255, 255, 255, 0.12);
-  --selection-bg: #1e3a5f;
-  --experiment-bg: #1e3a5f;
-  --experiment-border: #3a6ea5;
+  --selection-bg: #3a2a1c;
+  --selection-fg: #ff8a2a;
+  --menu-hover-bg: #1e2a44;
+  --menu-hover-fg: #9db6f5;
+  --experiment-bg: #1e2a44;
+  --experiment-border: #3a5aa8;
   --text-primary: rgba(255, 255, 255, 0.87);
   --text-secondary: rgba(255, 255, 255, 0.6);
+  --text-label: rgba(255, 255, 255, 0.5);
   --text-disabled: rgba(255, 255, 255, 0.38);
+  --caps: rgba(255, 255, 255, 0.4);
   --error: #ef5350;
   --error-bg: #4a1f1f;
   --warning: #ffb74d;
@@ -83,6 +147,7 @@ html[data-theme="dark"] {
   --shadow-2: 0 2px 8px rgba(0, 0, 0, 0.7);
   --shadow-3: 0 6px 20px rgba(0, 0, 0, 0.8);
   --plot-grid: #3c3c3c;
+  --plot-frame: #5a5a5a;
   --plot-axis: #cccccc;
   color-scheme: dark;
 }
@@ -90,9 +155,13 @@ html[data-theme="dark"] {
 /* Canvas and plots keep a bright background in dark mode unless explicitly included. */
 html[data-theme="dark"]:not([data-dark-canvas="true"]) {
   --canvas-bg: #ffffff;
-  --grid-dot: #d9d9d9;
+  --grid-line: #eae8ea;
+  --grid-dot: #eae8ea;
+  --plot-bg: #ffffff;
 }
 html[data-theme="dark"][data-dark-canvas="true"] {
   --canvas-bg: #1a1a1a;
-  --grid-dot: #444444;
+  --grid-line: #3a3a3a;
+  --grid-dot: #3a3a3a;
+  --plot-bg: #1a1a1a;
 }

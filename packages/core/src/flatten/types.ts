@@ -3,7 +3,7 @@
  * scoped expressions/modifications, and the shared flattening context.
  */
 import { ModelicaError, type ComponentDecl, type Diagnostic, type DiagnosticSeverity, type Equation, type Expr, type SourceLoc } from '../ast.js';
-import type { BaseType, Causality, FlatEquation, FlatVariable, Variability } from '../flat.js';
+import type { BaseType, Causality, FlatVariable, Variability } from '../flat.js';
 import type { ClassRegistry, RegisteredClass } from '../registry.js';
 import type { ConstValue } from './evaluate.js';
 import type { FlattenOptions } from './index.js';

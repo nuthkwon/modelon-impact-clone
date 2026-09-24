@@ -57,7 +57,6 @@ export function coerceToType(value: ConstValue, type: BaseType, enumerationLiter
   switch (type) {
     case 'Real':
       if (typeof value === 'number') return value;
-      if (typeof value === 'boolean') break;
       break;
     case 'Integer':
       if (typeof value === 'number') return Number.isInteger(value) ? value : Math.trunc(value);

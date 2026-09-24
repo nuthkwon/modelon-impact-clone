@@ -54,8 +54,8 @@ package Electrical "Library of electrical models (analog)"
 </html>"),
           experiment(StopTime=5e4, Interval=1),
           Diagram(coordinateSystem(preserveAspectRatio=true, extent={{-100,-100},{100,100}})));
-        // balance (flattened): 42 unknowns (L 6, Ro 8, G 8, C1 6, C2 6, Nr 6, Gnd 2), 42 equations
-        // (29 component equations + 13 connection equations from 4 connection sets with 13 pins)
+        // balance (flattened): 44 unknowns (L 6, Ro 9, G 9, C1 6, C2 6, Nr 6, Gnd 2), 44 equations
+        // (31 component equations + 13 connection equations from 4 connection sets with 13 pins)
       end ChuaCircuit;
 
       model CharacteristicIdealDiodes "Characteristic of ideal diodes"
@@ -124,8 +124,8 @@ Ideal.i versus Ideal.v, With_Ron_Goff.i versus With_Ron_Goff.v, With_Ron_Goff_Vk
 </p>
 </html>"),
           experiment(StopTime=1));
-        // balance (flattened): 68 unknowns (3 diodes x 8, 3 sine sources x 6, 3 resistors x 8, ground 2),
-        // 68 equations (49 component equations + 19 connection equations from 7 connection sets with 19 pins)
+        // balance (flattened): 74 unknowns (3 diodes x 9, 3 sine sources x 6, 3 resistors x 9, ground 2),
+        // 74 equations (55 component equations + 19 connection equations from 7 connection sets with 19 pins)
       end CharacteristicIdealDiodes;
 
       model CauerLowPassAnalog "Cauer low pass filter with analog components"
@@ -219,8 +219,8 @@ Ideal.i versus Ideal.v, With_Ron_Goff.i versus With_Ron_Goff.v, With_Ron_Goff_Vk
 <p>The example Cauer Filter is a low-pass-filter of the fifth order. It is realized using an analog network. The voltage source V is the input voltage (step), and the R2.p.v is the filter output voltage. The pulse response is calculated.</p>
 <p>The simulation end time should be 60. Please plot both V.p.v (input voltage) and R2.p.v (output voltage).</p>
 </html>"));
-        // balance (flattened): 66 unknowns (G 2, 5 capacitors x 6, 2 inductors x 6, 2 resistors x 8, V 6),
-        // 66 equations (45 component equations + 21 connection equations from 5 connection sets with 21 pins)
+        // balance (flattened): 68 unknowns (G 2, 5 capacitors x 6, 2 inductors x 6, 2 resistors x 9, V 6),
+        // 68 equations (47 component equations + 21 connection equations from 5 connection sets with 21 pins)
       end CauerLowPassAnalog;
 
       package Utilities "Utility components used by package Examples"
