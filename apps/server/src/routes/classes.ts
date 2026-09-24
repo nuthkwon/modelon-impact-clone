@@ -12,7 +12,7 @@
  *   GET    /:wid/classes/:className/documentation   Documentation annotation
  */
 import { Router } from 'express';
-import { applyEdit, buildClassTree, buildDiagramView, getParameters, parse, parseDocumentation, searchClasses, type ClassTreeNode, type EditOperation, type RegisteredClass } from '@impact/core';
+import { applyEdit, buildClassTree, buildDiagramView, getParameters, parse, parseDocumentation, searchClasses, tokenize, type ClassTreeNode, type EditOperation, type RegisteredClass } from '@impact/core';
 import type { ClassSourceDto, ClassTreeNodeDto, CreateClassRequest, ItemsResponse } from '@impact/protocol';
 import type { AppContext } from '../context.js';
 import { conflict, diagnosticsOf, notFound, readOnly, unprocessable } from '../errors.js';
@@ -80,12 +80,45 @@ function locateEnd(text: string, cls: RegisteredClass): { start: number; end: nu
   return matches[matches.length - 1];
 }
 
-/** Inserts `snippet` (unindented class text) as the last element of `parent`. */
+/**
+ * Offset of the first section keyword (`equation`, `initial equation`, `algorithm`,
+ * `initial algorithm`) of `parent` itself — tokens inside nested classes are skipped —
+ * or undefined when the class has no such section before `endOffset`.
+ */
+function sectionStart(text: string, parent: RegisteredClass, endOffset: number): number | undefined {
+  const from = parent.def.loc?.offset ?? 0;
+  const nested = parent.def.classes.map((c) => c.loc).filter((l): l is NonNullable<typeof l> => !!l).map((l) => [l.offset, l.offset + l.length] as const);
+  const insideNested = (offset: number) => nested.some(([a, b]) => offset >= a && offset < b);
+  try {
+    const tokens = tokenize(text.slice(from, endOffset));
+    for (let i = 0; i < tokens.length; i++) {
+      const tok = tokens[i];
+      if (tok.kind !== 'keyword') continue;
+      const abs = from + tok.loc.offset;
+      if (insideNested(abs)) continue;
+      if (tok.value === 'equation' || tok.value === 'algorithm') return abs;
+      if (tok.value === 'initial') {
+        const next = tokens[i + 1];
+        if (next?.kind === 'keyword' && (next.value === 'equation' || next.value === 'algorithm')) return abs;
+      }
+    }
+  } catch {
+    // Unlexable text: fall back to the first equation's location.
+  }
+  const offsets = [...parent.def.equations, ...parent.def.initialEquations].map((e) => e.loc?.offset).filter((o): o is number => o !== undefined);
+  if (!offsets.length) return undefined;
+  const first = Math.min(...offsets);
+  const matches = [...text.slice(from, first).matchAll(/\b(initial\s+)?(equation|algorithm)\b/g)];
+  return matches.length ? from + matches[matches.length - 1].index : undefined;
+}
+
+/** Inserts `snippet` (unindented class text) as the last element of `parent`'s declaration section. */
 function insertNestedClass(text: string, parent: RegisteredClass, snippet: string): string {
   const endMatch = locateEnd(text, parent);
   if (!endMatch) throw conflict(`Cannot locate 'end ${parent.def.name};' in the source of ${parent.fullName}`);
-  const lineStart = text.lastIndexOf('\n', endMatch.start - 1) + 1;
-  const prefix = text.slice(lineStart, endMatch.start);
+  const at = sectionStart(text, parent, endMatch.start) ?? endMatch.start;
+  const lineStart = text.lastIndexOf('\n', at - 1) + 1;
+  const prefix = text.slice(lineStart, at);
   const body = snippet.replace(/\s+$/, '');
   if (/^\s*$/.test(prefix)) {
     const inner = `${prefix}  `;
@@ -99,7 +132,7 @@ function insertNestedClass(text: string, parent: RegisteredClass, snippet: strin
     .split('\n')
     .map((l) => (l ? `  ${l}` : l))
     .join('\n');
-  return `${text.slice(0, endMatch.start)}\n${block}\n${text.slice(endMatch.start)}`;
+  return `${text.slice(0, at)}\n${block}\n${text.slice(at)}`;
 }
 
 /** Removes the text of `cls` (whole lines) from `text`; undefined when its extent is unknown. */
@@ -263,7 +296,11 @@ export function classRoutes(ctx: AppContext): Router {
     if (lib.readOnly || !lib.projectId) throw readOnly(`Class '${className}' belongs to the read-only library '${lib.name}'`);
     const pid = lib.projectId;
     const registered = wr.registry.getFile(lib.id, file.path);
-    const topLevelInFile = !cls || cls.parentName === registered?.definition.within;
+    // Without a parsed class (path fallback) only a class that owns its file may be deleted.
+    const classPath = className.split('.').join('/');
+    const ownsFile = file.path === `${classPath}.mo` || file.path === `${classPath}/package.mo`;
+    if (!cls && !ownsFile) throw conflict(`Class '${className}' could not be located in '${file.path}' (file has syntax errors)`, { diagnostics: file.diagnostics });
+    const topLevelInFile = cls ? cls.parentName === registered?.definition.within : true;
     const classesInFile = registered?.classNames.length ?? 1;
 
     if (topLevelInFile && classesInFile <= 1) {
@@ -283,6 +320,14 @@ export function classRoutes(ctx: AppContext): Router {
       } else {
         ctx.storage.deleteProjectFile(wid, pid, file.path);
         ctx.registries.deleteFile(wr, lib, file.path);
+        // Drop the class from a sibling package.order, if any.
+        const dir = file.path.includes('/') ? file.path.slice(0, file.path.lastIndexOf('/') + 1) : '';
+        const shortName = className.slice(className.lastIndexOf('.') + 1);
+        const order = readText(path.join(lib.containerDir, dir, 'package.order'));
+        if (order !== undefined) {
+          const kept = order.split(/\r?\n/).filter((l) => l.trim() !== shortName);
+          ctx.storage.writeProjectFile(wid, pid, `${dir}package.order`, `${kept.join('\n').replace(/\n+$/, '')}\n`);
+        }
       }
       res.status(204).end();
       return;

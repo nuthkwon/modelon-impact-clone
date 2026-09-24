@@ -42,6 +42,7 @@ export interface EvalContext {
   initial: boolean;
 }
 
+/** Compiled expression. Boolean results are 0/1; any value >= 0.5 counts as true. */
 export type Fn = (ctx: EvalContext) => number;
 
 export type UnknownKind = 'state' | 'algebraic' | 'discrete';
@@ -405,7 +406,7 @@ export function compileModel(flat: FlatModel, options: SimulationOptions): Compi
           case '+':
             return a;
           case 'not':
-            return (ctx) => (a(ctx) !== 0 ? 0 : 1);
+            return (ctx) => (a(ctx) >= 0.5 ? 0 : 1);
         }
         return fail(mode, `Unknown unary operator '${(e as { op: string }).op}'`);
       }
@@ -417,7 +418,7 @@ export function compileModel(flat: FlatModel, options: SimulationOptions): Compi
           const cond = compile(e.branches[i].cond, mode);
           const val = compile(e.branches[i].value, mode);
           const next = result;
-          result = (ctx) => (cond(ctx) !== 0 ? val(ctx) : next(ctx));
+          result = (ctx) => (cond(ctx) >= 0.5 ? val(ctx) : next(ctx));
         }
         return result;
       }
@@ -437,12 +438,12 @@ export function compileModel(flat: FlatModel, options: SimulationOptions): Compi
     if (op === 'and') {
       const l = compile(e.left, mode);
       const r = compile(e.right, mode);
-      return (ctx) => (l(ctx) !== 0 && r(ctx) !== 0 ? 1 : 0);
+      return (ctx) => (l(ctx) >= 0.5 && r(ctx) >= 0.5 ? 1 : 0);
     }
     if (op === 'or') {
       const l = compile(e.left, mode);
       const r = compile(e.right, mode);
-      return (ctx) => (l(ctx) !== 0 || r(ctx) !== 0 ? 1 : 0);
+      return (ctx) => (l(ctx) >= 0.5 || r(ctx) >= 0.5 ? 1 : 0);
     }
     const l = compile(e.left, mode);
     const r = compile(e.right, mode);
@@ -533,13 +534,13 @@ export function compileModel(flat: FlatModel, options: SimulationOptions): Compi
         const u = unknownRefArg(e, mode);
         if (!u) return () => 0;
         const i = u.index;
-        return (ctx) => (ctx.v[i] !== 0 && ctx.pre[i] === 0 ? 1 : 0);
+        return (ctx) => (ctx.v[i] >= 0.5 && ctx.pre[i] < 0.5 ? 1 : 0);
       }
       case 'change': {
         const u = unknownRefArg(e, mode);
         if (!u) return () => 0;
         const i = u.index;
-        return (ctx) => (ctx.v[i] !== ctx.pre[i] ? 1 : 0);
+        return (ctx) => (Math.abs(ctx.v[i] - ctx.pre[i]) >= 0.5 ? 1 : 0);
       }
       case 'initial':
         return (ctx) => (ctx.initial ? 1 : 0);

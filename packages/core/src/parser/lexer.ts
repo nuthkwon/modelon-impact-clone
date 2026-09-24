@@ -74,7 +74,7 @@ export function tokenize(text: string, file?: string): Token[] {
   while (i < n) {
     const c = text[i];
     // Whitespace
-    if (c === ' ' || c === '\t' || c === '\r' || c === '\n' || c === '\f' || c === '\v') {
+    if (c === ' ' || c === '\t' || c === '\r' || c === '\n' || c === '\f' || c === '\v' || c === '\uFEFF') {
       advance();
       continue;
     }

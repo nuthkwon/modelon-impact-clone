@@ -122,7 +122,8 @@ export function printExpr(e: Expr): string {
       const relational = p === 5;
       const power = p === 9;
       const leftParens = lp < p || (lp === p && (relational || power));
-      const rightParens = rp <= p || isNegative(e.right);
+      // A signed right operand needs parentheses after + - * / ^ (`a - (-b)`), not after relational/logical operators.
+      const rightParens = rp <= p || (isNegative(e.right) && p >= 6);
       const left = paren(printExpr(e.left), leftParens);
       const right = paren(printExpr(e.right), rightParens);
       const spaced = p <= 6; // and/or, relational, additive get spaces; * / ^ do not
@@ -310,7 +311,8 @@ function printClassLines(cls: ClassDef, pad: string, indent: string): string[] {
     out.push(`${pad}${wantProtected ? 'protected' : 'public'}`);
   };
   const blank = () => {
-    if (out.length && out[out.length - 1] !== '') out.push('');
+    // Separate nested classes from surrounding elements, but not from the class header itself.
+    if (out.length > 1 && out[out.length - 1] !== '') out.push('');
   };
 
   for (const imp of cls.imports) {

@@ -41,7 +41,7 @@ export function diagnosticsOf(err: unknown): Diagnostic[] {
 }
 
 export const notFoundHandler: RequestHandler = (req, res) => {
-  const body: ApiError = { error: { code: 'not_found', message: `No route for ${req.method} ${req.path}` } };
+  const body: ApiError = { error: { code: 'not_found', message: `No route for ${req.method} ${req.originalUrl.split('?')[0]}` } };
   res.status(404).json(body);
 };
 

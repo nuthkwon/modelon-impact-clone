@@ -8,7 +8,7 @@
  */
 import { performance } from 'node:perf_hooks';
 import type { Diagnostic, FlatModel, SimulationOptions, SimulationResult, SolverName } from '@impact/core';
-import type { CaseDto, CaseStatus, ExecutionStatus, ExecutionStatusResponse, ExperimentAnalysis, ExperimentDto, ModelExecutableDto } from '@impact/protocol';
+import type { CaseDto, CaseStatus, ExecutionStatus, ExecutionStatusResponse, ExperimentAnalysis, ExperimentDto } from '@impact/protocol';
 import type { Engine } from './engine.js';
 import { conflict, diagnosticsOf } from './errors.js';
 import type { RegistryCache } from './registry-cache.js';
@@ -223,7 +223,6 @@ export class JobRunner {
       c.run_info = { status: 'not_started' };
       this.storage.saveCase(wid, eid, c);
     }
-    experiment.run_info = { ...experiment.run_info, status: 'pending' };
     this.updateRunInfo(wid, eid, 'pending');
     setImmediate(() => this.runExecution(wid, eid, job));
     return { status: 'pending', progress: 0 };
@@ -399,5 +398,3 @@ export class JobRunner {
     return !!job && (job.status === 'pending' || job.status === 'running');
   }
 }
-
-export type { ModelExecutableDto };

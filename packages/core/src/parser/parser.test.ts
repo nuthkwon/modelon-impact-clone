@@ -341,7 +341,7 @@ describe('equations', () => {
       kind: 'if',
       branches: [
         { cond: E.bin('>', E.ref('a'), E.num(0)), equations: [{ kind: 'equals', left: E.ref('q'), right: E.num(1) }] },
-        { cond: E.bin('<', E.ref('a'), E.num(0)), equations: [{ kind: 'equals', left: E.ref('q'), right: E.neg(E.num(1)) }] },
+        { cond: E.bin('<', E.ref('a'), E.num(0)), equations: [{ kind: 'equals', left: E.ref('q'), right: E.num(-1) }] },
       ],
       else: [{ kind: 'equals', left: E.ref('q'), right: E.num(0) }],
     });
@@ -510,12 +510,17 @@ describe('expressions', () => {
     expect(expr('a .* b .+ c ./ d .^ 2 .- e')).toEqual(
       E.bin('.-', E.bin('.+', E.bin('.*', E.ref('a'), E.ref('b')), E.bin('./', E.ref('c'), E.bin('.^', E.ref('d'), E.num(2)))), E.ref('e')),
     );
-    expect(expr('a == b <> c')).toBeDefined;
     expect(() => parseExpression('a < b == c')).toThrow(/Expected end of input after expression but found '=='/);
   });
 
   it('parses literals', () => {
     expect(expr('1')).toEqual(E.num(1));
+    expect(expr('-1')).toEqual(E.num(-1));
+    expect(expr('- 2.5')).toEqual(E.num(-2.5));
+    expect(expr('+3')).toEqual(E.num(3));
+    expect(expr('-0.0')).toEqual(E.num(0));
+    expect(expr('-x')).toEqual(E.neg(E.ref('x')));
+    expect(expr('-(1)')).toEqual(E.num(-1));
     expect(expr('1.5')).toEqual(E.num(1.5));
     expect(expr('.5')).toEqual(E.num(0.5));
     expect(expr('1e-3')).toEqual(E.num(0.001));
@@ -587,7 +592,7 @@ describe('error messages', () => {
     expectParseError('model M\n  Real x(start=1;\nend M;', "Expected ')' to close modification but found ';' (line 2, column 17)");
     expectParseError('foo', "Expected class definition but found 'foo' (line 1, column 1)");
     expectParseError('model M\n  Real 1x;\nend M;', /Malformed number '1x'/);
-    expectParseError('model M\n  model Sub extends Base; end Sub;\nend M;', /'extends' class specifiers .* are not supported/);
+    expectParseError('model M\n  model extends Base\n  end Base;\nend M;', "'extends' class specifiers ('model extends Base ... end Base;') are not supported (line 2, column 9)");
   });
 
   it('exposes diagnostics through ModelicaError', () => {

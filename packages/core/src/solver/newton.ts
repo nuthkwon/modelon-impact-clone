@@ -18,6 +18,11 @@ export interface NewtonProblem {
   weights(z: Float64Array, w: Float64Array): void;
   /** Typical magnitudes (nominal values) used to size finite-difference perturbations. */
   typical: Float64Array;
+  /**
+   * Optional absolute perturbation per unknown (0 = relative default). Boolean/Integer unknowns
+   * use 1 so that a perturbation flips conditions the way a real change of the value would.
+   */
+  perturbation?: Float64Array;
 }
 
 export class JacobianCache {
@@ -54,6 +59,8 @@ export interface NewtonOptions {
    * accept the iterate anyway (default: not accepted).
    */
   relaxedTolerance?: number;
+  /** Recompute the Jacobian at every iteration (full Newton; used as an initialisation fallback). */
+  alwaysRefresh?: boolean;
 }
 
 export type NewtonFailure = 'singular' | 'max-iterations' | 'diverged' | 'non-finite';
@@ -89,10 +96,16 @@ const SQRT_EPS = 1.4901161193847656e-8;
 export function computeJacobian(p: NewtonProblem, z: Float64Array, f0: Float64Array, cache: JacobianCache, scratch: Float64Array): number {
   const n = p.n;
   const J = cache.jacobian;
+  const pert = p.perturbation;
   for (let j = 0; j < n; j++) {
     const zj = z[j];
-    let d = SQRT_EPS * Math.max(Math.abs(zj), p.typical[j]);
-    if (zj < 0) d = -d;
+    let d: number;
+    if (pert && pert[j] > 0) {
+      d = zj >= 0.5 ? -pert[j] : pert[j];
+    } else {
+      d = SQRT_EPS * Math.max(Math.abs(zj), p.typical[j]);
+      if (zj < 0) d = -d;
+    }
     z[j] = zj + d;
     p.residual(z, scratch);
     z[j] = zj;
@@ -241,6 +254,7 @@ export function newtonSolve(p: NewtonProblem, z: Float64Array, cache: JacobianCa
     delta = lambda * fullStep;
     z.set(zTrial);
     f.set(fNew);
+    if (options.alwaysRefresh) cache.invalidate();
 
     if (delta <= 1) {
       // Estimate the remaining error from the observed contraction rate.

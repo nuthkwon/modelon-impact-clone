@@ -1,0 +1,82 @@
+/* Shared primitives: tooltip/menu/dialog extras, popover, resizable handles, spinner, form rows. */
+
+/* Menu items (extends .menu / .menu-item from global.css) */
+.menu-item { position: relative; font-size: 13px; line-height: 32px; white-space: nowrap; }
+.menu-item.danger { color: var(--error); }
+.menu-item-icon { display: inline-flex; width: 20px; height: 20px; align-items: center; justify-content: center; color: var(--text-secondary); flex: 0 0 20px; }
+.menu-item.danger .menu-item-icon { color: var(--error); }
+.menu-item-label { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; }
+.menu-item-shortcut { color: var(--text-secondary); font-size: 11px; margin-left: 16px; }
+.menu-item-check { width: 16px; display: inline-flex; justify-content: center; color: var(--accent); }
+.menu-header { padding: 6px 14px 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--text-secondary); }
+
+/* Tooltip (base .tooltip in global.css) */
+.tooltip { max-width: 320px; line-height: 16px; opacity: 0; transition: opacity 80ms ease-out; }
+.tooltip.visible { opacity: 1; }
+.tooltip.multiline { white-space: pre-line; }
+.tooltip-anchor { display: inline-flex; }
+
+/* Dialog extras */
+.dialog { animation: dialog-in 120ms ease-out; color: var(--text-primary); outline: none; }
+@keyframes dialog-in { from { opacity: 0; transform: translateY(6px) scale(.98); } to { opacity: 1; transform: none; } }
+.dialog-title { display: flex; align-items: center; gap: 8px; }
+.dialog-title .dialog-close { margin-left: auto; color: var(--text-secondary); }
+.dialog-body { font-size: 13px; line-height: 20px; color: var(--text-primary); }
+.dialog-body p { margin: 6px 0; }
+.dialog-message { white-space: pre-line; color: var(--text-primary); }
+.dialog.compact { min-width: 360px; }
+.dialog.wide { min-width: 560px; }
+
+/* Form rows */
+.form-row { display: flex; flex-direction: column; gap: 4px; margin: 8px 0 12px; }
+.form-row > label, .form-label { font-size: 12px; color: var(--text-secondary); }
+.form-row .text-field, .form-row select.text-field { height: 32px; }
+.form-row textarea.text-field { height: auto; min-height: 60px; padding: 6px 8px; resize: vertical; }
+.form-help { font-size: 11px; color: var(--text-secondary); }
+.form-error { font-size: 12px; color: var(--error); }
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+select.text-field { appearance: auto; }
+.switch-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 36px; padding: 2px 0; }
+.switch-row .switch-label { display: flex; flex-direction: column; }
+.switch-row .switch-sub { font-size: 11px; color: var(--text-secondary); }
+.switch { position: relative; width: 34px; height: 14px; border-radius: 7px; background: var(--border-strong); transition: background 120ms; flex: 0 0 auto; }
+.switch::after { content: ''; position: absolute; top: -3px; left: -2px; width: 20px; height: 20px; border-radius: 50%; background: var(--surface); box-shadow: var(--shadow-1); transition: transform 120ms, background 120ms; }
+.switch.on { background: color-mix(in srgb, var(--accent) 50%, transparent); }
+.switch.on::after { transform: translateX(18px); background: var(--accent); }
+.switch:disabled { opacity: .4; }
+.checkbox-row { display: flex; align-items: center; gap: 8px; min-height: 28px; }
+.checkbox-row input { accent-color: var(--accent); width: 16px; height: 16px; margin: 0; }
+
+/* Popover */
+.popover { position: fixed; z-index: 1000; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-3); color: var(--text-primary); animation: popover-in 100ms ease-out; }
+@keyframes popover-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+
+/* Resizable panel */
+.resizable { position: relative; flex: 0 0 auto; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.resizable-content { flex: 1 1 auto; min-height: 0; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
+.resizable-handle { position: absolute; z-index: 5; user-select: none; touch-action: none; }
+.resizable-handle::after { content: ''; position: absolute; inset: 0; background: transparent; transition: background 120ms; }
+.resizable-handle:hover::after, .resizable-handle.dragging::after { background: var(--accent); opacity: .6; }
+.resizable.side-left .resizable-handle { top: 0; bottom: 0; right: -3px; width: 6px; cursor: col-resize; }
+.resizable.side-right .resizable-handle { top: 0; bottom: 0; left: -3px; width: 6px; cursor: col-resize; }
+.resizable.side-bottom .resizable-handle { left: 0; right: 0; top: -3px; height: 6px; cursor: row-resize; }
+.resizable.side-left .resizable-handle::after, .resizable.side-right .resizable-handle::after { left: 2px; right: 2px; }
+.resizable.side-bottom .resizable-handle::after { top: 2px; bottom: 2px; }
+body.resizing-col { cursor: col-resize !important; user-select: none; }
+body.resizing-row { cursor: row-resize !important; user-select: none; }
+body.resizing-col *, body.resizing-row * { cursor: inherit !important; }
+
+/* Spinner */
+.spinner { display: inline-block; width: 24px; height: 24px; border-radius: 50%; border: 3px solid var(--border); border-top-color: var(--accent); animation: spin .8s linear infinite; }
+.spinner.small { width: 16px; height: 16px; border-width: 2px; }
+.spinner.large { width: 40px; height: 40px; border-width: 4px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Empty / centred states */
+.centered-state { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; height: 100%; color: var(--text-secondary); text-align: center; padding: 24px; }
+.centered-state .state-title { font-size: 14px; color: var(--text-primary); }
+
+/* Keyboard key cap */
+.kbd { display: inline-block; min-width: 20px; padding: 0 6px; height: 20px; line-height: 18px; border: 1px solid var(--border-strong); border-bottom-width: 2px; border-radius: 4px; font-family: var(--font-mono); font-size: 11px; text-align: center; background: var(--surface-2); color: var(--text-primary); }
+
+.visually-hidden { position: absolute !important; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

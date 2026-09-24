@@ -235,6 +235,9 @@ class Parser {
       default:
         this.expected('class restriction (model, package, ...)');
     }
+    if (this.isKw('extends')) {
+      this.fail(`'extends' class specifiers ('${restriction} extends ${this.peek(1).value} ... end ${this.peek(1).value};') are not supported`);
+    }
     const nameTok = this.expectIdent('as class name');
     const cls: ClassDef = {
       kind: 'class',
@@ -252,8 +255,6 @@ class Parser {
     };
     if (this.acceptOp('=')) {
       this.parseShortClassSpecifier(cls);
-    } else if (this.isKw('extends')) {
-      this.fail(`'extends' class specifiers ('${restriction} ${cls.name} extends ...') are not supported`);
     } else {
       const description = this.parseStringComment();
       if (description !== undefined) cls.description = description;
@@ -272,7 +273,7 @@ class Parser {
   /** After `Name =`: `enumeration(...)` or `[input|output|flow] TypeName[dims](mods)`, then comment. */
   private parseShortClassSpecifier(cls: ClassDef): void {
     if (this.isKw('enumeration')) {
-      const kw = this.next();
+      this.next();
       const open = this.expectOp('(', "after 'enumeration'");
       const mods: Modifier[] = [];
       if (!this.acceptOp(':')) {
@@ -288,7 +289,6 @@ class Parser {
       }
       this.expectOp(')', 'to close enumeration literal list');
       cls.shortClass = { typeName: 'enumeration', modification: { mods, loc: span(open.loc, this.last().loc) } };
-      void kw;
     } else {
       const sc: NonNullable<ClassDef['shortClass']> = { typeName: '' };
       for (;;) {
@@ -868,7 +868,10 @@ class Parser {
     if (this.isOp('-') || this.isOp('+')) {
       const op = this.next().value as '-' | '+';
       const operand = this.parseUnary();
-      return { kind: 'unary', op, operand, loc: span(start.loc, this.last().loc) };
+      const loc = span(start.loc, this.last().loc);
+      // Fold signs on number literals: `-100` is a negative number, not unary minus applied to 100.
+      if (operand.kind === 'number') return { kind: 'number', value: op === '-' && operand.value !== 0 ? -operand.value : operand.value, loc };
+      return { kind: 'unary', op, operand, loc };
     }
     return this.parseFactor();
   }

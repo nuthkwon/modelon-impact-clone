@@ -95,6 +95,10 @@ describe('tokenize', () => {
     expect(tokens[tokens.length - 1].loc).toEqual({ line: 3, column: 7, offset: text.length, length: 0 });
   });
 
+  it('ignores a leading byte order mark', () => {
+    expect(values('\uFEFFmodel M')).toEqual(['model', 'M']);
+  });
+
   it('handles CRLF line endings', () => {
     const tokens = tokenize('a\r\nb');
     expect(tokens[1].loc).toMatchObject({ line: 2, column: 1, offset: 3 });

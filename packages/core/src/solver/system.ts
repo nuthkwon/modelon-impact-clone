@@ -26,6 +26,8 @@ export class System {
   readonly atol: Float64Array;
   /** Nominal magnitude per unknown. */
   readonly nominal: Float64Array;
+  /** Absolute finite-difference perturbation per unknown (1 for Boolean/Integer, 0 = relative). */
+  readonly perturbation: Float64Array;
   readonly stats: SimulationStats;
   readonly log: LogFn;
   readonly options: SimulationOptions;
@@ -57,9 +59,11 @@ export class System {
     const atolBase = options.atol !== undefined && options.atol > 0 ? options.atol : 1e-6;
     this.atol = new Float64Array(m.nU);
     this.nominal = new Float64Array(m.nU);
+    this.perturbation = new Float64Array(m.nU);
     for (const u of m.unknowns) {
       this.nominal[u.index] = u.nominal;
       this.atol[u.index] = atolBase * Math.max(1, u.nominal);
+      this.perturbation[u.index] = u.type === 'Real' ? 0 : 1;
     }
     this.v = this.ctx.v;
     this.dv = this.ctx.dv;
@@ -141,6 +145,7 @@ export class System {
         for (let i = 0; i < n; i++) w[i] = NEWTON_FACTOR * (sys.atol[i] + sys.rtol * Math.abs(z[i]));
       },
       typical: this.nominal.subarray(0, n),
+      perturbation: this.perturbation.subarray(0, n),
     };
     const cache = this.implicitCache;
     if (cache.valid && Number.isFinite(this.implicitAlpha) && Math.abs(alpha / this.implicitAlpha - 1) > 0.3) cache.invalidate();
@@ -180,6 +185,7 @@ export class System {
         for (let i = 0; i < nS; i++) w[nA + i] = NEWTON_FACTOR * (sys.atol[i] + sys.rtol * Math.abs(z[nA + i]));
       },
       typical: this.algebraicTypical(),
+      perturbation: this.algebraicPerturbation(),
     };
     const z = new Float64Array(n);
     for (let i = 0; i < nA; i++) z[i] = v[nS + i];
@@ -203,6 +209,16 @@ export class System {
       this.algTypical = t;
     }
     return this.algTypical;
+  }
+
+  private algPert?: Float64Array;
+  private algebraicPerturbation(): Float64Array {
+    if (!this.algPert) {
+      const t = new Float64Array(this.nA + this.nS);
+      for (let i = 0; i < this.nA; i++) t[i] = this.perturbation[this.nS + i];
+      this.algPert = t;
+    }
+    return this.algPert;
   }
 
   /** Human-readable explanation of a Newton failure for the algebraic subsystem. */

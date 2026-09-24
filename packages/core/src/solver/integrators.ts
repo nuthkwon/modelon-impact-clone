@@ -198,7 +198,9 @@ class VariableStepImplicit extends BaseIntegrator {
     const nS = sys.nS;
     const nSA = nS + sys.nA;
     vP.set(v0);
-    if (this.stepsSinceRestart === 0 || this.order === 1) {
+    // BDF1 pairs with the explicit Euler predictor (error constant 0.5); BDF2 and the
+    // trapezoidal rule use the quadratic predictor once history is available.
+    if (this.stepsSinceRestart === 0 || (this.method === 'bdf' && this.order === 1)) {
       for (let i = 0; i < nS; i++) vP[i] = v0[i] + h * dv0[i];
       return;
     }

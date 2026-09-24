@@ -92,7 +92,7 @@ export function createApp(options: AppOptions = {}): ImpactApp {
   app.use('/api/workspaces', experimentRoutes(context));
   app.use('/api', notFoundHandler);
 
-  const webDist = options.webDist === undefined ? DEFAULT_WEB_DIST : options.webDist;
+  const webDist = options.webDist === undefined ? DEFAULT_WEB_DIST : options.webDist ? path.resolve(options.webDist) : false;
   if (webDist && isDirectory(webDist)) {
     app.use(express.static(webDist, { index: 'index.html' }));
     app.use((req, res, next) => {
