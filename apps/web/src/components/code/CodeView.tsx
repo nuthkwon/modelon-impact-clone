@@ -58,7 +58,7 @@ const errorGutter = gutter({
   lineMarkerChange: (update) => update.startState.field(errorLineField) !== update.state.field(errorLineField),
 });
 
-const errorLineDecoration = EditorView.decorations.compute([errorLineField], (state): DecorationSet => {
+const errorLineDecoration = EditorView.decorations.compute(['doc', errorLineField], (state): DecorationSet => {
   const n = state.field(errorLineField);
   if (n === null || n < 1 || n > state.doc.lines) return Decoration.none;
   const line = state.doc.line(n);

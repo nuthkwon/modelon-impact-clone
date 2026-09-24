@@ -91,6 +91,8 @@ export interface ClassInstance {
   declaredIn?: RegisteredClass;
   isConnector: boolean;
   protected: boolean;
+  /** `parameter`/`constant` prefix of this component (or an enclosing one): applies to all leaf variables. */
+  forcedVariability?: 'parameter' | 'constant';
   components: Map<string, Instance>;
   /** Component names in declaration order (bases first). */
   order: string[];

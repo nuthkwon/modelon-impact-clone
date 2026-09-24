@@ -53,7 +53,7 @@ export function resolveRef(ctx: Ctx, ref: Expr & { kind: 'ref' }, scope: Scope):
   const names = ref.parts.map((p) => p.name);
   const dotted = names.join('.');
   if (!ref.global && scope.inst) {
-    const found = resolveInInstance(ctx, ref.parts, scope, scope.inst);
+    const found = resolveInInstance(ctx, ref.parts, scope, scope.inst, loc);
     if (found) return { kind: 'instance', inst: found };
   }
   if (!ref.global && names.length === 1 && names[0] === 'time') return { kind: 'time' };
@@ -63,35 +63,30 @@ export function resolveRef(ctx: Ctx, ref: Expr & { kind: 'ref' }, scope: Scope):
 }
 
 /** Looks `parts` up as a (possibly dotted) component of `inst`. Returns undefined when the first part is not a component. */
-function resolveInInstance(ctx: Ctx, parts: RefPart[], scope: Scope, inst: ClassInstance): Instance | undefined {
+function resolveInInstance(ctx: Ctx, parts: RefPart[], scope: Scope, inst: ClassInstance, loc?: SourceLoc): Instance | undefined {
   const first = parts[0].name;
+  const dotted = parts.map((p) => p.name).join('.');
+  const disabledError = (name: string): never => {
+    throw error(`Component '${name}' is conditionally disabled and cannot be referenced in ${scope.cls.fullName}`, {
+      path: pathOf(scope),
+      loc,
+      file: fileOf(ctx, scope.cls),
+    });
+  };
   let cur: Instance | undefined = inst.components.get(first);
   if (!cur) {
-    if (inst.disabled.has(first)) {
-      throw error(`Component '${first}' is conditionally disabled and cannot be referenced in ${scope.cls.fullName}`, {
-        path: pathOf(scope),
-        loc: parts[0].subscripts ? undefined : undefined,
-        file: fileOf(ctx, scope.cls),
-      });
-    }
+    if (inst.disabled.has(first)) disabledError(first);
     return undefined;
   }
   for (let i = 1; i < parts.length; i++) {
     const name = parts[i].name;
     if (cur.kind !== 'class') {
-      const dotted = parts.map((p) => p.name).join('.');
-      return unknownIdentifier(ctx, dotted, scope, undefined, `'${parts.slice(0, i).map((p) => p.name).join('.')}' is a scalar ${cur.type} variable`);
+      return unknownIdentifier(ctx, dotted, scope, loc, `'${parts.slice(0, i).map((p) => p.name).join('.')}' is a scalar ${cur.type} variable`);
     }
     const next: Instance | undefined = cur.components.get(name);
     if (!next) {
-      const dotted = parts.map((p) => p.name).join('.');
-      if (cur.disabled.has(name)) {
-        throw error(`Component '${dotted}' is conditionally disabled and cannot be referenced in ${scope.cls.fullName}`, {
-          path: pathOf(scope),
-          file: fileOf(ctx, scope.cls),
-        });
-      }
-      return unknownIdentifier(ctx, dotted, scope, undefined, `'${name}' is not a component of ${cur.cls.fullName}`);
+      if (cur.disabled.has(name)) disabledError(parts.slice(0, i + 1).map((p) => p.name).join('.'));
+      return unknownIdentifier(ctx, dotted, scope, loc, `'${name}' is not a component of ${cur.cls.fullName}`);
     }
     cur = next;
   }

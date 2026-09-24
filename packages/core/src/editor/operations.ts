@@ -254,17 +254,33 @@ export function canonicalizeTransformation(t: Transformation): Transformation {
       rotation: 0,
     };
   }
+  const centered = centerTransformation(t);
+  centered.rotation = rotation;
+  return centered;
+}
+
+/** Visual centre of a placed component in parent coordinates: `origin + R(rotation) · centre(extent)`. */
+function visualCenter(t: Transformation): Point {
   const [cx, cy] = extentCenter(t.extent);
+  const [rx, ry] = applyMatrixToVector(rotationMatrix(t.rotation), [cx, cy]);
+  return [t.origin[0] + rx, t.origin[1] + ry];
+}
+
+/**
+ * Equivalent transformation whose origin is the visual centre and whose extent is centred on it.
+ * Rotations and flips are about the origin, so this must be applied before them to keep the
+ * component in place.
+ */
+function centerTransformation(t: Transformation): Transformation {
   const hw = (t.extent[1][0] - t.extent[0][0]) / 2; // signed: keeps flips
   const hh = (t.extent[1][1] - t.extent[0][1]) / 2;
-  const [rx, ry] = applyMatrixToVector(rotationMatrix(t.rotation), [cx, cy]);
-  return { origin: [t.origin[0] + rx, t.origin[1] + ry], extent: [[-hw, -hh], [hw, hh]], rotation };
+  return { origin: visualCenter(t), extent: [[-hw, -hh], [hw, hh]], rotation: t.rotation };
 }
 
 function updateTransformation(ctx: EditContext, name: string, verb: string, fn: (t: Transformation) => Transformation): void {
   const comp = requireOwnComponent(ctx, name, verb);
   const placement = placementOf(comp);
-  placement.transformation = roundTransformation(canonicalizeTransformation(fn(placement.transformation)));
+  placement.transformation = roundTransformation(canonicalizeTransformation(fn(centerTransformation(placement.transformation))));
   writePlacement(comp, placement);
 }
 
@@ -433,10 +449,8 @@ function defaultPoints(ctx: EditContext, a: RefExpr, b: RefExpr): Point[] {
   const originOf = (ref: RefExpr): Point => {
     const entry = componentsOf(ctx.registry, ctx.className, ctx.target).find((e) => e.decl.name === ref.parts[0].name);
     if (!entry) return [0, 0];
-    const t = placementOf(entry.decl).transformation;
-    const [cx, cy] = extentCenter(t.extent);
-    const [rx, ry] = applyMatrixToVector(rotationMatrix(t.rotation), [cx, cy]);
-    return [round2(t.origin[0] + rx), round2(t.origin[1] + ry)];
+    const [x, y] = visualCenter(placementOf(entry.decl).transformation);
+    return [round2(x), round2(y)];
   };
   return [originOf(a), originOf(b)];
 }
